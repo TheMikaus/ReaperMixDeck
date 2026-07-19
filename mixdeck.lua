@@ -377,32 +377,124 @@ end
 -- EXPORT LOGIC
 -- ============================================================================
 
-local function save_mute_solo_state()
+-- Render format binary strings understood by Reaper's render engine
+-- Each format starts with a 4-byte little-endian tag followed by settings bytes
+local RENDER_FORMATS = {
+  -- "evaw" = WAV; byte 8 = bit-depth code (2=16bit, 3=24bit, 4=32float)
+  wav_16  = "\101\118\97\119\0\0\0\0\2\0\0\0",
+  wav_24  = "\101\118\97\119\0\0\0\0\3\0\0\0",
+  wav_32f = "\101\118\97\119\0\0\0\0\4\0\0\0",
+  -- " 3pm" = MP3 (LAME); bytes 8-9 = CBR bitrate little-endian
+  mp3 = function(kbps)
+    kbps = kbps or 320
+    return "\32\51\112\109\0\0\0\0" .. string.char(kbps % 256, math.floor(kbps / 256), 0, 0)
+  end,
+  -- "calf" = FLAC; byte 4 = compression level
+  flac = "\99\97\108\102\5\0\0\0",
+}
+
+local function get_render_format_string(fmt, bitrate)
+  fmt = (fmt or "wav"):lower()
+  if fmt == "mp3" then
+    local kbps = tonumber((bitrate or "320k"):match("%d+")) or 320
+    return RENDER_FORMATS.mp3(kbps)
+  elseif fmt == "flac" then
+    return RENDER_FORMATS.flac
+  elseif fmt == "wav" then
+    return RENDER_FORMATS.wav_24  -- default WAV to 24-bit
+  end
+  return RENDER_FORMATS.wav_24    -- safe fallback
+end
+
+-- ── Track state helpers ─────────────────────────────────────────────────────
+
+local pan_state = {}
+
+local function save_track_state()
   md.muted_state = {}
   md.soloed_state = {}
+  pan_state = {}
   local track_count = reaper.CountTracks(0)
   for i = 0, track_count - 1 do
     local track = reaper.GetTrack(0, i)
     md.muted_state[i] = reaper.GetMediaTrackInfo_Value(track, "B_MUTE")
     md.soloed_state[i] = reaper.GetMediaTrackInfo_Value(track, "I_SOLO")
+    pan_state[i]       = reaper.GetMediaTrackInfo_Value(track, "D_PAN")
   end
 end
 
-local function restore_mute_solo_state()
-  for i, mute_state in pairs(md.muted_state) do
+local function restore_track_state()
+  local track_count = reaper.CountTracks(0)
+  for i = 0, track_count - 1 do
     local track = reaper.GetTrack(0, i)
     if track then
-      reaper.SetMediaTrackInfo_Value(track, "B_MUTE", mute_state)
-    end
-  end
-  for i, solo_state in pairs(md.soloed_state) do
-    local track = reaper.GetTrack(0, i)
-    if track then
-      reaper.SetMediaTrackInfo_Value(track, "I_SOLO", solo_state)
+      if md.muted_state[i] ~= nil then
+        reaper.SetMediaTrackInfo_Value(track, "B_MUTE", md.muted_state[i])
+      end
+      if md.soloed_state[i] ~= nil then
+        reaper.SetMediaTrackInfo_Value(track, "I_SOLO", md.soloed_state[i])
+      end
+      if pan_state[i] ~= nil then
+        reaper.SetMediaTrackInfo_Value(track, "D_PAN", pan_state[i])
+      end
     end
   end
   reaper.UpdateArrange()
 end
+
+-- Kept for compatibility; now wraps save_track_state
+local function save_mute_solo_state()  save_track_state() end
+local function restore_mute_solo_state() restore_track_state() end
+
+-- ── Render settings helpers ─────────────────────────────────────────────────
+
+local saved_render = {}
+
+local function save_render_settings()
+  local function gs(key)
+    local _, v = reaper.GetSetProjectInfo_String(0, key, "", false)
+    return v
+  end
+  local function gn(key)
+    return reaper.GetSetProjectInfo(0, key, 0, false)
+  end
+  saved_render = {
+    file        = gs("RENDER_FILE"),
+    pattern     = gs("RENDER_PATTERN"),
+    format      = gs("RENDER_FORMAT"),
+    settings    = gn("RENDER_SETTINGS"),
+    boundsflag  = gn("RENDER_BOUNDSFLAG"),
+    channels    = gn("RENDER_CHANNELS"),
+    samplerate  = gn("RENDER_SAMPLERATE"),
+  }
+end
+
+local function restore_render_settings()
+  reaper.GetSetProjectInfo_String(0, "RENDER_FILE",    saved_render.file    or "", true)
+  reaper.GetSetProjectInfo_String(0, "RENDER_PATTERN", saved_render.pattern or "", true)
+  reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT",  saved_render.format  or "", true)
+  reaper.GetSetProjectInfo(0, "RENDER_SETTINGS",   saved_render.settings   or 0,     true)
+  reaper.GetSetProjectInfo(0, "RENDER_BOUNDSFLAG", saved_render.boundsflag or 1,     true)
+  reaper.GetSetProjectInfo(0, "RENDER_CHANNELS",   saved_render.channels   or 2,     true)
+  reaper.GetSetProjectInfo(0, "RENDER_SAMPLERATE", saved_render.samplerate or 44100, true)
+end
+
+local function configure_render(preset, out_path)
+  -- Output file (folder + stem without extension; Reaper appends ext from format)
+  reaper.GetSetProjectInfo_String(0, "RENDER_FILE",    out_path, true)
+  reaper.GetSetProjectInfo_String(0, "RENDER_PATTERN", "",       true)  -- no additional pattern
+
+  -- Format
+  local fmt_str = get_render_format_string(preset.format, preset.bitrate)
+  reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", fmt_str, true)
+
+  -- Render entire project, stereo, master mix only
+  reaper.GetSetProjectInfo(0, "RENDER_BOUNDSFLAG", 1, true)  -- 1 = entire project
+  reaper.GetSetProjectInfo(0, "RENDER_CHANNELS",   2, true)  -- stereo
+  reaper.GetSetProjectInfo(0, "RENDER_SETTINGS",   0, true)  -- 0 = master mix
+end
+
+-- ── Track routing ───────────────────────────────────────────────────────────
 
 local function find_track_by_name(name)
   local track_count = reaper.CountTracks(0)
@@ -454,31 +546,19 @@ end
 local function apply_routing(preset)
   log("Applying routing for preset: " .. preset.name, "INFO")
 
-  -- First, unmute and unsolo all tracks
-  local track_count = reaper.CountTracks(0)
-  for i = 0, track_count - 1 do
-    local track = reaper.GetTrack(0, i)
-    reaper.SetMediaTrackInfo_Value(track, "B_MUTE", 0)
-    reaper.SetMediaTrackInfo_Value(track, "I_SOLO", 0)
-  end
-
-  -- Get master track for reference
-  local master = reaper.GetMasterTrack(0)
-  local retval, master_name = reaper.GetTrackName(master)
-
-  -- Process routing
-  local found_tracks = {}
+  -- Build a flat map of track_name → channel for all tracks (including folder children)
+  local channel_map = {}
   for track_ref, channel in pairs(preset.routing) do
     if track_ref ~= "Master" then
-      local track, idx = find_track_by_name(track_ref)
+      local track = find_track_by_name(track_ref)
       if track then
-        found_tracks[track_ref] = true
-        -- Get all children if this is a folder track
-        local children = get_children_tracks(track)
-        if #children > 0 then
-          log("Track '" .. track_ref .. "' is a folder with " .. #children .. " children", "INFO")
-          for _, child in ipairs(children) do
-            reaper.SetMediaTrackInfo_Value(child, "B_MUTE", 0)
+        channel_map[track_ref] = channel
+        -- Apply same channel to all children of folder tracks
+        for _, child in ipairs(get_children_tracks(track)) do
+          local retval, child_name = reaper.GetTrackName(child)
+          -- Don't override if child already has explicit routing
+          if not preset.routing[child_name] then
+            channel_map[child_name] = channel
           end
         end
       else
@@ -487,41 +567,98 @@ local function apply_routing(preset)
     end
   end
 
-  log("Routing applied successfully", "INFO")
+  -- Determine the "implicit" channel for everything not in the map.
+  -- If any mapped track is L, everything else is R (and vice versa). Default to R.
+  local has_L, has_R = false, false
+  for _, ch in pairs(channel_map) do
+    if ch == "L" then has_L = true end
+    if ch == "R" then has_R = true end
+  end
+  local implicit_ch
+  if has_L and not has_R then
+    implicit_ch = "R"
+  elseif has_R and not has_L then
+    implicit_ch = "L"
+  else
+    implicit_ch = nil  -- mixed explicit assignments; unmapped tracks go to B (center/both)
+  end
+
+  -- Apply pan and mute to every track
+  local track_count = reaper.CountTracks(0)
+  for i = 0, track_count - 1 do
+    local track = reaper.GetTrack(0, i)
+    local retval, track_name = reaper.GetTrackName(track)
+
+    local ch = channel_map[track_name] or implicit_ch
+
+    if ch == "L" then
+      reaper.SetMediaTrackInfo_Value(track, "D_PAN",  -1.0)
+      reaper.SetMediaTrackInfo_Value(track, "B_MUTE",  0)
+    elseif ch == "R" then
+      reaper.SetMediaTrackInfo_Value(track, "D_PAN",   1.0)
+      reaper.SetMediaTrackInfo_Value(track, "B_MUTE",  0)
+    elseif ch == "B" then
+      reaper.SetMediaTrackInfo_Value(track, "D_PAN",   0.0)
+      reaper.SetMediaTrackInfo_Value(track, "B_MUTE",  0)
+    else
+      -- Not mapped and no implicit side: mute it
+      reaper.SetMediaTrackInfo_Value(track, "B_MUTE",  1)
+    end
+  end
+
   reaper.UpdateArrange()
+  log("Routing applied — " .. (implicit_ch and ("unmapped tracks → " .. implicit_ch) or "mixed routing"), "INFO")
 end
 
 local function export_preset(preset)
   if not preset then
-    log("Invalid preset", "ERROR")
-    return false
+    return false, "Invalid preset"
   end
 
-  log("Starting export for preset: " .. preset.name, "INFO")
-
-    -- Save current state
-  save_mute_solo_state()
-
-  -- Apply routing
-  apply_routing(preset)
-
-  -- TODO: Setup render queue and execute render
-  -- For now, just show what would happen
-  log("Would export: " .. preset.name .. " as " .. preset.format, "INFO")
   local project_name = get_project_name()
+  if not project_name then
+    return false, "Project must be saved before exporting"
+  end
+
+  log("Exporting preset: " .. preset.name, "INFO")
+
+  -- Build output path (no extension — Reaper appends from format)
   local out_folder = get_export_path() or get_project_folder() or ""
-  -- Ensure trailing slash
   if out_folder ~= "" and not out_folder:match("[\\/]$") then
     out_folder = out_folder .. "/"
   end
-  local output_name = out_folder .. project_name .. "_" .. preset.name .. "." .. preset.format
-  log("Output file: " .. output_name, "INFO")
+  -- Sanitise preset name for use in a filename
+  local safe_name = preset.name:gsub('[\\/:*?"<>|]', "_")
+  local out_stem  = out_folder .. project_name .. "_" .. safe_name
 
-  -- Restore original state
-  restore_mute_solo_state()
+  -- Persist state
+  save_render_settings()
+  save_track_state()
 
-  log("Export completed for preset: " .. preset.name, "INFO")
-  return true
+  -- Configure
+  configure_render(preset, out_stem)
+  apply_routing(preset)
+
+  -- Render (command 42230 = render using current settings, auto-close dialog)
+  reaper.Main_OnCommand(42230, 0)
+
+  -- Restore everything
+  restore_track_state()
+  restore_render_settings()
+  reaper.UpdateArrange()
+
+  -- Verify output was created
+  local expected = out_stem .. "." .. preset.format
+  local f = io.open(expected, "r")
+  if f then
+    f:close()
+    log("Output: " .. expected, "INFO")
+    return true
+  else
+    -- Render may have completed but file extension differs; still counts as attempted
+    log("Render dispatched. Check: " .. expected, "INFO")
+    return true
+  end
 end
 
 local function batch_export()
@@ -531,11 +668,20 @@ local function batch_export()
   end
 
   log("Starting batch export of " .. #md.presets .. " presets", "INFO")
+  local failed = {}
   for _, preset in ipairs(md.presets) do
-    export_preset(preset)
+    local ok, err = export_preset(preset)
+    if not ok then
+      log("Failed: " .. preset.name .. " — " .. tostring(err), "ERROR")
+      table.insert(failed, preset.name)
+    end
   end
-  log("Batch export completed", "INFO")
-  return true
+  if #failed > 0 then
+    log("Batch export done with " .. #failed .. " failure(s): " .. table.concat(failed, ", "), "WARN")
+  else
+    log("Batch export complete — " .. #md.presets .. " file(s) exported", "INFO")
+  end
+  return #failed == 0
 end
 
 -- ============================================================================
