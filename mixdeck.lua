@@ -9,9 +9,11 @@ local json = dofile(debug.getinfo(1).source:match("@?(.*/?)") .. "json_utils.lua
 local md = {
   version = "1.0.0",
   name = "MixDeck",
-  global_presets = {},   -- Presets shared across all projects
-  project_presets = {},  -- Presets specific to the current project
-  presets = {},          -- Merged view: global + project (read-only, rebuilt on load/save)
+  global_presets = {},      -- Presets shared across all projects
+  project_presets = {},     -- Presets specific to the current project
+  presets = {},             -- Merged view: global + project (read-only, rebuilt on load/save)
+  global_export_path = "", -- Common output folder for all projects
+  project_export_path = "",-- Per-project output folder override
   config_file = "",
   current_project = "",
   ui_open = false,
@@ -119,8 +121,7 @@ local function load_config_file(path)
   local content = file:read("*all")
   file:close()
   local success, result = pcall(function()
-    local data = json_decode_simple(content)
-    return data.presets or {}
+    return json_decode_simple(content)
   end)
   if success then
     return result
@@ -131,23 +132,39 @@ local function load_config_file(path)
 end
 
 local function load_config()
-  -- Load global presets (shared across all projects)
+  -- Load global config (presets + global export path)
   local global_path = get_global_config_path()
-  md.global_presets = load_config_file(global_path)
+  local global_data = load_config_file(global_path)
+  md.global_presets = global_data.presets or {}
+  md.global_export_path = global_data.export_path or ""
   log("Loaded " .. #md.global_presets .. " global presets from: " .. global_path, "INFO")
 
-  -- Load project presets (specific to this project)
+  -- Load project config (presets + project export path override)
   local project_path = get_project_config_path()
   if project_path then
-    md.project_presets = load_config_file(project_path)
+    local project_data = load_config_file(project_path)
+    md.project_presets = project_data.presets or {}
+    md.project_export_path = project_data.export_path or ""
     log("Loaded " .. #md.project_presets .. " project presets from: " .. project_path, "INFO")
   else
     md.project_presets = {}
+    md.project_export_path = ""
     log("No active project — skipping project preset load", "WARN")
   end
 
   rebuild_merged_presets()
   return md.presets
+end
+
+-- Resolve the output folder: project path > global path > project folder
+local function get_export_path()
+  if md.project_export_path and md.project_export_path ~= "" then
+    return md.project_export_path
+  elseif md.global_export_path and md.global_export_path ~= "" then
+    return md.global_export_path
+  else
+    return get_project_folder()  -- fallback: same folder as .rpp
+  end
 end
 
 -- Save a preset to global or project scope
@@ -197,12 +214,14 @@ end
 
 local function save_config(scope)
   scope = scope or "global"
-  local target, path
+  local target, export_path_val, path
   if scope == "global" then
     target = md.global_presets
+    export_path_val = md.global_export_path
     path = get_global_config_path()
   else
     target = md.project_presets
+    export_path_val = md.project_export_path
     path = get_project_config_path()
     if not path then
       log("No active project — cannot save project config", "WARN")
@@ -214,7 +233,12 @@ local function save_config(scope)
     log("Failed to open config for writing: " .. path, "ERROR")
     return false
   end
-  local data = { version = md.version, presets = target, timestamp = os.time() }
+  local data = {
+    version = md.version,
+    presets = target,
+    export_path = export_path_val,
+    timestamp = os.time()
+  }
   file:write(json_encode(data))
   file:close()
   log("Saved " .. scope .. " config to: " .. path, "INFO")
@@ -475,7 +499,7 @@ local function export_preset(preset)
 
   log("Starting export for preset: " .. preset.name, "INFO")
 
-  -- Save current state
+    -- Save current state
   save_mute_solo_state()
 
   -- Apply routing
@@ -485,11 +509,20 @@ local function export_preset(preset)
   -- For now, just show what would happen
   log("Would export: " .. preset.name .. " as " .. preset.format, "INFO")
   local project_name = get_project_name()
-  local output_name = project_name .. "_" .. preset.name .. "." .. preset.format
+  local out_folder = get_export_path() or get_project_folder() or ""
+  -- Ensure trailing slash
+  if out_folder ~= "" and not out_folder:match("[\\/]$") then
+    out_folder = out_folder .. "/"
+  end
+  local output_name = out_folder .. project_name .. "_" .. preset.name .. "." .. preset.format
   log("Output file: " .. output_name, "INFO")
 
   -- Restore original state
   restore_mute_solo_state()
+
+  log("Export completed for preset: " .. preset.name, "INFO")
+  return true
+end
 
 local function batch_export()
   if #md.presets == 0 then
@@ -506,68 +539,27 @@ local function batch_export()
 end
 
 -- ============================================================================
--- UI MANAGEMENT
--- ============================================================================
-
-local function show_ui()
-  log("Opening MixDeck UI", "INFO")
-  md.ui_open = true
-
-  local msg = md.name .. " v" .. md.version .. "\n"
-  msg = msg .. "======================\n\n"
-  msg = msg .. "Total Presets: " .. #md.presets .. "\n\n"
-  msg = msg .. "Available Commands:\n"
-  msg = msg .. "  list     - List all presets\n"
-  msg = msg .. "  tracks   - Show track structure\n"
-  msg = msg .. "  create   - Create new preset\n"
-  msg = msg .. "  delete   - Delete preset\n"
-  msg = msg .. "  route    - Add track to preset\n"
-  msg = msg .. "  export   - Export preset\n"
-  msg = msg .. "  batch    - Export all presets\n"
-  msg = msg .. "  save     - Save config\n"
-  msg = msg .. "  quit     - Close\n\n"
-
-  log(msg, "INFO")
-end
-
-local function list_presets()
-  if #md.presets == 0 then
-    log("No presets defined", "INFO")
-    return
-  end
-
-  log("=== Presets [global: " .. #md.global_presets .. ", project: " .. #md.project_presets .. "] ===", "INFO")
-  for i, preset in ipairs(md.presets) do
-    local scope_tag = "[" .. (preset.scope or "global") .. "]"
-    log(i .. ". " .. scope_tag .. " " .. preset.name .. " (" .. preset.format .. ")", "INFO")
-    for track, channel in pairs(preset.routing) do
-      log("   -> " .. track .. " : " .. channel, "INFO")
-    end
-  end
-  log("======================================", "INFO")
-end
-
--- ============================================================================
 -- INITIALIZATION & MAIN LOOP
 -- ============================================================================
+
+-- Functions table exposed to the UI module
+local fns = {
+  create_preset        = create_preset,
+  delete_preset        = delete_preset,
+  get_preset           = get_preset,
+  save_preset_to_scope = save_preset_to_scope,
+  save_config          = save_config,
+  get_all_tracks       = get_all_tracks,
+  get_project_name     = get_project_name,
+  get_export_path      = get_export_path,
+  export_preset        = export_preset,
+  batch_export         = batch_export,
+}
 
 local function init()
   log("Initializing " .. md.name .. " v" .. md.version, "INFO")
   log("Global config: " .. get_global_config_path(), "INFO")
-
-  -- Load global + project presets and merge
   load_config()
-
-  -- Show initial UI
-  show_ui()
-
-  -- Print track structure
-  print_track_structure()
-end
-
-local function main_loop()
-  -- This will be called repeatedly via defer for UI responsiveness
-  reaper.defer(main_loop)
 end
 
 -- ============================================================================
@@ -575,4 +567,19 @@ end
 -- ============================================================================
 
 init()
+
+-- Load and start the ImGui UI
+local script_path = debug.getinfo(1).source:match("@?(.*/?)")
+local ui = dofile(script_path .. "ui.lua")
+ui.init(md, fns)
+
+local function main_loop()
+  local open = ui.draw()
+  if open then
+    reaper.defer(main_loop)
+  else
+    ui.destroy()
+  end
+end
+
 main_loop()
