@@ -1,0 +1,19 @@
+# Reaper files
+*.reaper_ses
+*.rec
+*.wav
+*.mp3
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local testing
+test_projects/
+*.mixdeck.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

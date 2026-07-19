@@ -1,0 +1,34 @@
+{
+  "version": "1.0.0",
+  "presets": [
+    {
+      "name": "Bass Isolated",
+      "routing": {
+        "Bass_Dry": "L",
+        "Master": "R"
+      },
+      "format": "mp3",
+      "bitrate": "320k"
+    },
+    {
+      "name": "Guitar + Vocals",
+      "routing": {
+        "Guitar_Dry": "L",
+        "Guitar_Wet_1": "L",
+        "Guitar_Wet_2": "L",
+        "Vocals": "L",
+        "Master": "R"
+      },
+      "format": "mp3",
+      "bitrate": "320k"
+    },
+    {
+      "name": "Full Mix",
+      "routing": {
+        "Master": "B"
+      },
+      "format": "mp3",
+      "bitrate": "320k"
+    }
+  ]
+}
