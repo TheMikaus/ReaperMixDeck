@@ -9,12 +9,14 @@ local json = dofile(debug.getinfo(1).source:match("@?(.*/?)") .. "json_utils.lua
 local md = {
   version = "1.0.0",
   name = "MixDeck",
-  presets = {},
+  global_presets = {},   -- Presets shared across all projects
+  project_presets = {},  -- Presets specific to the current project
+  presets = {},          -- Merged view: global + project (read-only, rebuilt on load/save)
   config_file = "",
   current_project = "",
   ui_open = false,
   selected_preset = nil,
-  muted_state = {}, -- Track original mute states during export
+  muted_state = {},  -- Track original mute states during export
   soloed_state = {}, -- Track original solo states during export
 }
 
@@ -47,13 +49,54 @@ local function get_project_name()
   return name
 end
 
-local function get_config_file_path()
+-- Global config lives in Reaper's resource path, survives across all projects
+local function get_global_config_path()
+  local resource_path = reaper.GetResourcePath()
+  local dir = resource_path .. "/Scripts/MixDeck"
+  -- Ensure directory exists (Reaper 6.29+: reaper.RecursiveCreateDirectory)
+  reaper.RecursiveCreateDirectory(dir, 0)
+  return dir .. "/mixdeck_global.json"
+end
+
+-- Per-project config lives next to the .rpp file
+local function get_project_config_path()
   local folder = get_project_folder()
   local name = get_project_name()
   if not folder or not name then
     return nil
   end
   return folder .. name .. ".mixdeck.json"
+end
+
+-- Legacy alias used by export naming
+local function get_config_file_path()
+  return get_project_config_path()
+end
+
+-- Rebuild the merged preset list (global first, project presets override by name)
+local function rebuild_merged_presets()
+  local merged = {}
+  local seen = {}
+  -- Global presets go in first
+  for _, p in ipairs(md.global_presets) do
+    table.insert(merged, p)
+    seen[p.name] = true
+  end
+  -- Project presets: if same name exists globally, override it; otherwise append
+  for _, p in ipairs(md.project_presets) do
+    if seen[p.name] then
+      for i, m in ipairs(merged) do
+        if m.name == p.name then
+          merged[i] = p  -- project wins
+          break
+        end
+      end
+    else
+      table.insert(merged, p)
+      seen[p.name] = true
+    end
+  end
+  md.presets = merged
 end
 
 -- Simple JSON encode/decode using Lua tables
@@ -69,59 +112,112 @@ end
 -- CONFIG MANAGEMENT
 -- ============================================================================
 
-local function load_config()
-  local config_path = get_config_file_path()
-  if not config_path then
-    log("No active project - cannot load config", "WARN")
-    return {}
-  end
-
-  local file = io.open(config_path, "r")
-  if not file then
-    log("Config file not found: " .. config_path .. ", starting fresh", "INFO")
-    return {}
-  end
-
+local function load_config_file(path)
+  if not path then return {} end
+  local file = io.open(path, "r")
+  if not file then return {} end
   local content = file:read("*all")
   file:close()
-
   local success, result = pcall(function()
     local data = json_decode_simple(content)
     return data.presets or {}
   end)
-
   if success then
-    log("Loaded " .. #result .. " presets from: " .. config_path, "INFO")
     return result
   else
-    log("Failed to parse config file: " .. result, "ERROR")
+    log("Failed to parse: " .. path .. " - " .. tostring(result), "ERROR")
     return {}
   end
 end
 
-local function save_config()
-  local config_path = get_config_file_path()
-  if not config_path then
-    log("No active project - cannot save config", "WARN")
-    return false
+local function load_config()
+  -- Load global presets (shared across all projects)
+  local global_path = get_global_config_path()
+  md.global_presets = load_config_file(global_path)
+  log("Loaded " .. #md.global_presets .. " global presets from: " .. global_path, "INFO")
+
+  -- Load project presets (specific to this project)
+  local project_path = get_project_config_path()
+  if project_path then
+    md.project_presets = load_config_file(project_path)
+    log("Loaded " .. #md.project_presets .. " project presets from: " .. project_path, "INFO")
+  else
+    md.project_presets = {}
+    log("No active project — skipping project preset load", "WARN")
   end
 
-  local file = io.open(config_path, "w")
+  rebuild_merged_presets()
+  return md.presets
+end
+
+-- Save a preset to global or project scope
+-- scope: "global" or "project" (default: global)
+local function save_preset_to_scope(preset, scope)
+  scope = scope or "global"
+  local target, path
+  if scope == "global" then
+    target = md.global_presets
+    path = get_global_config_path()
+  else
+    target = md.project_presets
+    path = get_project_config_path()
+    if not path then
+      log("Cannot save project preset — no active project", "WARN")
+      return false
+    end
+  end
+
+  -- Update or insert in the target list
+  local found = false
+  for i, p in ipairs(target) do
+    if p.name == preset.name then
+      target[i] = preset
+      found = true
+      break
+    end
+  end
+  if not found then
+    table.insert(target, preset)
+  end
+
+  -- Write to disk
+  local file = io.open(path, "w")
   if not file then
-    log("Failed to open config file for writing: " .. config_path, "ERROR")
+    log("Failed to write " .. scope .. " config: " .. path, "ERROR")
     return false
   end
-
-  local data = {
-    version = md.version,
-    presets = md.presets,
-    timestamp = os.time(),
-  }
-
-  local json_str = json_encode(data)
-  file:write(json_str)
+  local data = { version = md.version, presets = target, timestamp = os.time() }
+  file:write(json_encode(data))
   file:close()
-  log("Config saved to: " .. config_path, "INFO")
+
+  rebuild_merged_presets()
+  log("Saved preset '" .. preset.name .. "' to " .. scope .. " scope", "INFO")
+  return true
+end
+
+local function save_config(scope)
+  scope = scope or "global"
+  local target, path
+  if scope == "global" then
+    target = md.global_presets
+    path = get_global_config_path()
+  else
+    target = md.project_presets
+    path = get_project_config_path()
+    if not path then
+      log("No active project — cannot save project config", "WARN")
+      return false
+    end
+  end
+  local file = io.open(path, "w")
+  if not file then
+    log("Failed to open config for writing: " .. path, "ERROR")
+    return false
+  end
+  local data = { version = md.version, presets = target, timestamp = os.time() }
+  file:write(json_encode(data))
+  file:close()
+  log("Saved " .. scope .. " config to: " .. path, "INFO")
   return true
 end
 
@@ -129,13 +225,15 @@ end
 -- PRESET MANAGEMENT
 -- ============================================================================
 
-local function create_preset(name)
+-- scope: "global" (default) or "project"
+local function create_preset(name, scope)
+  scope = scope or "global"
   if not name or name == "" then
     log("Preset name cannot be empty", "WARN")
     return nil
   end
 
-  -- Check if preset already exists
+  -- Check merged presets for name collision
   for _, preset in ipairs(md.presets) do
     if preset.name == name then
       log("Preset '" .. name .. "' already exists", "WARN")
@@ -145,27 +243,45 @@ local function create_preset(name)
 
   local preset = {
     name = name,
+    scope = scope,
     routing = {},
     format = "mp3",
     bitrate = "320k",
     timestamp = os.time(),
   }
 
-  table.insert(md.presets, preset)
-  log("Created preset: " .. name, "INFO")
+  save_preset_to_scope(preset, scope)
+  log("Created " .. scope .. " preset: " .. name, "INFO")
   return preset
 end
 
 local function delete_preset(name)
-  for i, preset in ipairs(md.presets) do
+  local deleted = false
+  -- Remove from global presets if present
+  for i, preset in ipairs(md.global_presets) do
     if preset.name == name then
-      table.remove(md.presets, i)
-      log("Deleted preset: " .. name, "INFO")
-      return true
+      table.remove(md.global_presets, i)
+      save_config("global")
+      deleted = true
+      break
     end
   end
-  log("Preset not found: " .. name, "WARN")
-  return false
+  -- Remove from project presets if present
+  for i, preset in ipairs(md.project_presets) do
+    if preset.name == name then
+      table.remove(md.project_presets, i)
+      save_config("project")
+      deleted = true
+      break
+    end
+  end
+  if deleted then
+    rebuild_merged_presets()
+    log("Deleted preset: " .. name, "INFO")
+  else
+    log("Preset not found: " .. name, "WARN")
+  end
+  return deleted
 end
 
 local function get_preset(name)
@@ -184,13 +300,21 @@ local function update_preset_routing(preset_name, track_name, channel)
     return false
   end
 
-  if channel ~= "L" and channel ~= "R" and channel ~= "B" then
-    log("Invalid channel: " .. channel .. " (must be L, R, or B)", "WARN")
+  if channel ~= "L" and channel ~= "R" and channel ~= "B" and channel ~= nil then
+    log("Invalid channel: " .. tostring(channel) .. " (must be L, R, B, or nil to remove)", "WARN")
     return false
   end
 
-  preset.routing[track_name] = channel
-  log("Updated routing: " .. preset_name .. " -> " .. track_name .. " to " .. channel, "INFO")
+  if channel == nil then
+    preset.routing[track_name] = nil  -- Remove the entry
+  else
+    preset.routing[track_name] = channel
+  end
+
+  -- Persist to whichever scope this preset belongs to
+  local scope = preset.scope or "global"
+  save_preset_to_scope(preset, scope)
+  log("Updated routing: " .. preset_name .. " -> " .. track_name .. " = " .. tostring(channel), "INFO")
   return true
 end
 
@@ -412,14 +536,15 @@ local function list_presets()
     return
   end
 
-  log("=== Presets ===", "INFO")
+  log("=== Presets [global: " .. #md.global_presets .. ", project: " .. #md.project_presets .. "] ===", "INFO")
   for i, preset in ipairs(md.presets) do
-    log(i .. ". " .. preset.name .. " (" .. preset.format .. ")", "INFO")
+    local scope_tag = "[" .. (preset.scope or "global") .. "]"
+    log(i .. ". " .. scope_tag .. " " .. preset.name .. " (" .. preset.format .. ")", "INFO")
     for track, channel in pairs(preset.routing) do
       log("   -> " .. track .. " : " .. channel, "INFO")
     end
   end
-  log("===============", "INFO")
+  log("======================================", "INFO")
 end
 
 -- ============================================================================
@@ -428,9 +553,10 @@ end
 
 local function init()
   log("Initializing " .. md.name .. " v" .. md.version, "INFO")
+  log("Global config: " .. get_global_config_path(), "INFO")
 
-  -- Load config from project
-  md.presets = load_config()
+  -- Load global + project presets and merge
+  load_config()
 
   -- Show initial UI
   show_ui()
