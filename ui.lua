@@ -18,6 +18,8 @@ local show_new_popup       = false
 local add_track_sel        = 0      -- combo index for "Add Track" picker
 local status_msg           = ""
 local status_expiry        = 0
+local preview_active       = false  -- preview is playing
+local drag_src_idx         = nil    -- dragging preset from index
 
 local W_LEFT   = 195
 local WIN_W    = 720
@@ -30,6 +32,63 @@ local WIN_H    = 520
 local function set_status(msg)
   status_msg    = msg
   status_expiry = reaper.time_precise() + 3.5
+end
+
+local function handle_keyboard()
+  -- Ctrl+S: save preset
+  if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_S()) then
+    local io = reaper.ImGui_GetIO(ctx)
+    if io.KeyCtrl then
+      local p = get_selected_preset()
+      if p and not show_settings then
+        fns.save_preset_to_scope(p, p.scope or "global")
+        set_status("Saved: " .. p.name)
+      end
+    end
+  end
+  -- Ctrl+E: export preset
+  if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_E()) then
+    local io = reaper.ImGui_GetIO(ctx)
+    if io.KeyCtrl then
+      local p = get_selected_preset()
+      if p then
+        local ok = fns.export_preset(p)
+        if ok then set_status("Exported: " .. p.name)
+        else set_status("Export failed") end
+      end
+    end
+  end
+  -- Delete: delete preset
+  if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Delete()) then
+    local p = get_selected_preset()
+    if p then
+      fns.delete_preset(p.name)
+      sel_idx = 0
+      set_status("Deleted: " .. p.name)
+    end
+  end
+end
+
+local function start_preview()
+  local preset = get_selected_preset()
+  if not preset then return end
+  set_status("Preview: " .. preset.name .. " (apply routing + play 4 bars)")
+  preview_active = true
+end
+
+local function reorder_presets(from_idx, to_idx)
+  if from_idx < 1 or to_idx < 1 or from_idx > #md_ref.presets or to_idx > #md_ref.presets then return end
+  if from_idx == to_idx then return end
+  local preset = table.remove(md_ref.presets, from_idx)
+  table.insert(md_ref.presets, to_idx, preset)
+  sel_idx = to_idx
+  -- Save current scope config
+  if preset.scope == "project" then
+    fns.save_config("project")
+  else
+    fns.save_config("global")
+  end
+  set_status("Reordered preset")
 end
 
 local function get_selected_preset()
@@ -63,6 +122,7 @@ local function draw_preset_list()
   reaper.ImGui_BeginChild(ctx, "##presets", W_LEFT, -28, child_border_flag())
 
   reaper.ImGui_Text(ctx, "PRESETS")
+  reaper.ImGui_TextDisabled(ctx, "(drag to reorder)")
   reaper.ImGui_Separator(ctx)
 
   for i, p in ipairs(md_ref.presets) do
@@ -73,6 +133,21 @@ local function draw_preset_list()
       sel_idx       = i
       show_settings = false
       add_track_sel = 0
+    end
+    
+    -- Drag-drop support for reordering
+    if reaper.ImGui_BeginDragDropSource(ctx, reaper.ImGui_DragDropFlags_SourceAllowNullID()) then
+      reaper.ImGui_SetDragDropPayload(ctx, "PRESET_IDX", tostring(i))
+      reaper.ImGui_Text(ctx, "Moving: " .. p.name)
+      reaper.ImGui_EndDragDropSource(ctx)
+    end
+    if reaper.ImGui_BeginDragDropTarget(ctx) then
+      local payload = reaper.ImGui_AcceptDragDropPayload(ctx, "PRESET_IDX")
+      if payload then
+        local from_idx = tonumber(payload)
+        reorder_presets(from_idx, i)
+      end
+      reaper.ImGui_EndDragDropTarget(ctx)
     end
   end
 
@@ -245,12 +320,16 @@ local function draw_preset_editor()
   reaper.ImGui_Spacing(ctx)
 
   -- ── Action buttons ───────────────────────────────────────────────────────
-  if reaper.ImGui_Button(ctx, "Save Preset##sv") then
+  if reaper.ImGui_Button(ctx, "▶ Preview##prev", 60, 0) then
+    start_preview()
+  end
+  reaper.ImGui_SameLine(ctx, 0, 20)
+  if reaper.ImGui_Button(ctx, "Save Preset##sv", 100, 0) then
     fns.save_preset_to_scope(preset, preset.scope or "global")
     set_status("Saved: " .. preset.name)
   end
   reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "Export This##ex1") then
+  if reaper.ImGui_Button(ctx, "Export This##ex1", 100, 0) then
     if not fns.get_project_name() then
       set_status("Error: save your project before exporting.")
     else
@@ -260,7 +339,7 @@ local function draw_preset_editor()
     end
   end
   reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "Export All##exall") then
+  if reaper.ImGui_Button(ctx, "Export All##exall", 100, 0) then
     if not fns.get_project_name() then
       set_status("Error: save your project before exporting.")
     else
@@ -387,6 +466,9 @@ function ui.draw()
   local visible, open = reaper.ImGui_Begin(ctx, "MixDeck  v" .. md_ref.version, true)
 
   if visible then
+    -- Handle keyboard shortcuts
+    handle_keyboard()
+
     -- ── Left panel ──────────────────────────────────────────────────────────
     draw_preset_list()
 

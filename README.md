@@ -1,56 +1,143 @@
-# MixDeck
+# MixDeck 🎛️ v1.0.0
 
-A ReaScript tool for managing multi-channel export presets. Configure track routing rules and batch export multiple versions of your mix automatically.
+A fast, professional **export preset manager** for Reaper. Define once, export forever — manage multi-channel mixes with L/R routing configurations, batch export all variations in one click.
 
 ## Features
 
-- **Export Presets**: Define multiple export configurations
-- **Track Routing**: Map individual tracks or parent tracks to left/right channels
-- **Batch Export**: Export all presets in one go with automatic muting/soloing
-- **Project Integration**: Configurations stored as JSON, tied to the project file
-- **Easy UI**: Simple dock/window interface for preset management
+✅ **Preset Library** — Global presets (shared across all projects) + project-scoped presets (specific to one project). Presets override smartly.
 
-## Project Structure
+✅ **Track Routing** — Map individual tracks or parent folder tracks to Left/Right/Both channels. Unmapped tracks get the opposite channel automatically.
 
+✅ **Batch Export** — Queue up export configs and render all of them in sequence. Muting, panning, and project state are automatically handled.
+
+✅ **Format Support** — MP3 (with bitrate control: 128–320k), WAV (24-bit), FLAC.
+
+✅ **Flexible Export Paths** — Common export folder (all projects) + per-project overrides. Falls back to the project folder if not configured.
+
+✅ **Keyboard Shortcuts**
+- **Ctrl+S** — Save current preset
+- **Ctrl+E** — Export current preset
+- **Delete** — Delete selected preset
+- **Drag presets** to reorder them
+
+✅ **ImGui-Based UI** — Fast, responsive, dockable window with a clean editor and settings panel.
+
+✅ **Installer** — Automatically checks for dependencies (ReaImGui) and installs to the correct Reaper folder.
+
+## What It Solves
+
+Instead of manually:
 ```
-MixDeck/
-├── mixdeck.lua                      # Main ReaScript
-├── config/                          # Default configuration templates
-│   └── default_config.json
-├── docs/                            # Documentation
-│   └── usage.md
-└── README.md
+1. Mute some tracks
+2. Render
+3. Restore, mute different tracks
+4. Render again
+5. (repeat for every mix variation...)
 ```
+
+With MixDeck:
+```
+1. Define presets: "Bass Isolated", "Guitar + Vox", "Full Mix"
+2. Click "Export All"
+3. (Done — all files rendered with correct routing)
+```
+
+## Requirements
+
+- **Reaper** 6.0+
+- **ReaImGui** extension 0.8+ (install via Extensions → ReaPack)
+
+## Installation
+
+1. **Run the installer:**
+   - Open Reaper
+   - Actions → Load ReaScript
+   - Browse to `MixDeck/install.lua`
+   - Click Run
+
+2. **Install ReaImGui (if prompted):**
+   - Extensions → ReaPack → Browse packages
+   - Search: `ReaImGui`
+   - Install by cfillion
+   - Restart Reaper
+   - Re-run the installer
+
+3. **Open MixDeck:**
+   - Actions → Action list (search: `MixDeck`)
+   - Double-click to open, or assign a keyboard shortcut
 
 ## Quick Start
 
-1. Open this script in Reaper's Script Editor
-2. Run the script to open the configuration window
-3. Create export presets with your channel mappings
-4. Hit "Export All" to batch render
+### 1. Create a Preset
+- Click **+ New** in the left panel
+- Name it (e.g. `Bass Isolated`)
+- Choose **Global** or **Project** scope
+- Click **Create**
 
-## Configuration Format
+### 2. Configure Routing
+- Use **+ Add Track** to pick tracks from your project
+- Set each track's channel: **L**, **R**, or **B** (both)
+- The **(everything else)** row is implicit — unmapped tracks go to the opposite side
 
-Export configurations are stored as JSON in the project file metadata or a companion `.json` file.
+### 3. Export
+- Click **Export This** for a single preset, or
+- Click **Export All** to render all presets at once
 
-Example preset:
-```json
-{
-  "name": "Bass Isolated",
-  "routing": {
-    "Bass_Dry": "L",
-    "Everything_Else": "R"
-  },
-  "format": "mp3",
-  "bitrate": "320k"
-}
-```
+Output files: `{ProjectName}_{PresetName}.mp3` (or `.wav`, `.flac`)
 
-## Development Status
+## File Locations
 
-- [ ] Core ReaScript structure
-- [ ] Configuration UI (defer or imgui based)
-- [ ] Track analysis and routing logic
-- [ ] Batch export automation
-- [ ] JSON config persistence
-- [ ] Error handling and validation
+| File | Location |
+|---|---|
+| MixDeck scripts | `{Reaper resource path}/Scripts/MixDeck/` |
+| Global presets | `{Reaper resource path}/Scripts/MixDeck/mixdeck_global.json` |
+| Project presets | `{project folder}/{project name}.mixdeck.json` |
+
+## Architecture
+
+**mixdeck.lua** (550+ lines)
+- Config management (JSON save/load)
+- Preset CRUD
+- Track routing & pan control
+- Real render queue integration
+
+**ui.lua** (400+ lines)
+- ImGui-based editor
+- Preset list with drag-to-reorder
+- Track routing table
+- Export folder settings
+
+**json_utils.lua** (150+ lines)
+- Standalone JSON encoder/decoder
+
+**install.lua**
+- Dependency checker
+- Auto-installer to Reaper Scripts folder
+
+## Planned Features (v1.1+)
+
+- Audio preview (play 4 bars with current routing)
+- Presets library browser / web sync
+- Render progress indicator
+- Undo support
+- Stems export (one file per track)
+- Loudness normalization
+
+## Troubleshooting
+
+**ReaImGui not found**
+→ Install via Extensions → ReaPack → Browse packages, search `ReaImGui`
+
+**Tracks not routing correctly**
+→ Track names in presets must match project track names exactly (case-sensitive)
+
+**Config file missing after export**
+→ Check console (View → Show console) for `[MixDeck]` error messages
+
+## License
+
+MIT (see LICENSE file if included)
+
+---
+
+**Made for Reaper musicians. Happy mixing! 🎶**
