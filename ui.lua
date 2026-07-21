@@ -415,10 +415,10 @@ local function draw_new_preset_popup()
     show_new_popup = false  -- flag to open; ImGui manages visibility thereafter
   end
 
-  local _, p_open = reaper.ImGui_BeginPopupModal(ctx, "New Preset##popup", true,
+  local visible, p_open = reaper.ImGui_BeginPopupModal(ctx, "New Preset##popup", true,
     reaper.ImGui_WindowFlags_AlwaysAutoResize())
 
-  if p_open then
+  if visible then
     reaper.ImGui_Text(ctx, "Preset name:")
     reaper.ImGui_PushItemWidth(ctx, 280)
     local nc, nv = reaper.ImGui_InputText(ctx, "##preset_name_input", new_preset_name_buf)
@@ -463,7 +463,7 @@ local function draw_new_preset_popup()
       reaper.ImGui_CloseCurrentPopup(ctx)
     end
 
-    reaper.ImGui_EndPopupModal(ctx)
+    reaper.ImGui_EndPopup(ctx)
   end
 end
 
