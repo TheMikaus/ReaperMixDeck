@@ -16,7 +16,7 @@ end
 local json = dofile(get_script_dir() .. "json_utils.lua")
 
 local md = {
-  version = "1.1.0",
+  version = "1.1.1",
   name = "MixDeck",
   global_presets = {},      -- Presets shared across all projects
   project_presets = {},     -- Presets specific to the current project
