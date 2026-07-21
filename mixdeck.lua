@@ -723,6 +723,13 @@ end
 
 init()
 
+-- Close the console window (optional cleanup)
+-- Try to find and trigger the console close action
+local console_close_cmd = reaper.NamedCommandLookup("_SWSTL_CLSCONSW")
+if console_close_cmd and console_close_cmd ~= 0 then
+  reaper.Main_OnCommand(console_close_cmd, 0)
+end
+
 -- Load and start the ImGui UI
 local ui = dofile(get_script_dir() .. "ui.lua")
 ui.init(md, fns)
