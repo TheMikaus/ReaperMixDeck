@@ -45,22 +45,22 @@ With MixDeck:
 ## Requirements
 
 - **Reaper** 6.0+
-- **ReaImGui** extension 0.8+ (install via Extensions → ReaPack)
+- **ReaImGui** extension 0.8+ (installed via ReaPack package manager)
 
 ## Installation
 
-1. **Run the installer:**
+1. **Install ReaImGui first (if not already present):**
    - Open Reaper
-   - Actions → Load ReaScript
-   - Browse to `MixDeck/install.lua`
-   - Click Run
-
-2. **Install ReaImGui (if prompted):**
-   - Extensions → ReaPack → Browse packages
-   - Search: `ReaImGui`
-   - Install by cfillion
+   - Look for **Extensions → ReaPack → Browse packages** (or try **Help → About REAPER → Show REAPER resource path**, then open `Scripts/Packages/ReaImGui` folder if it exists)
+   - If ReaPack isn't visible, you can **install it manually**: Download from [cfillion/reaimgui](https://github.com/cfillion/reaimgui/releases) and extract to `{Reaper resource path}/UserPlugins/`
+   - Search for `ReaImGui` and install by cfillion
    - Restart Reaper
-   - Re-run the installer
+
+2. **Run the MixDeck installer:**
+   - Open Reaper
+   - **Actions → Load ReaScript**
+   - Browse to `MixDeck/install.lua` and click **Run**
+   - The installer will verify ReaImGui is present and set up MixDeck
 
 3. **Open MixDeck:**
    - Actions → Action list (search: `MixDeck`)
@@ -125,8 +125,17 @@ Output files: `{ProjectName}_{PresetName}.mp3` (or `.wav`, `.flac`)
 
 ## Troubleshooting
 
-**ReaImGui not found**
-→ Install via Extensions → ReaPack → Browse packages, search `ReaImGui`
+**Can't find "Extensions → ReaPack" menu**
+→ ReaPack may not be installed. Try:
+   - **Help → ReaPack...** (some versions show it here)
+   - **Tools → ReaPack...** (other versions)
+   - If still not found, manually download ReaImGui from [cfillion/reaimgui](https://github.com/cfillion/reaimgui/releases) and extract to `{Reaper resource path}/UserPlugins/`
+
+**ReaImGui not found after installation**
+→ ReaImGui needs to be installed/enabled in Reaper before running MixDeck installer. Make sure you:
+   - Installed ReaImGui via ReaPack (or manually to UserPlugins)
+   - Restarted Reaper
+   - Check Reaper console (View → Show console) for any errors
 
 **Tracks not routing correctly**
 → Track names in presets must match project track names exactly (case-sensitive)
