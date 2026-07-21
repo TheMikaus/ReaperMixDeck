@@ -179,9 +179,9 @@ end
 -- RIGHT PANEL: PRESET EDITOR
 -- ============================================================================
 
-local CHANNELS      = "L (Left)\0R (Right)\0B (Both)\0"
-local CHANNEL_KEYS  = { "L", "R", "B" }
-local ch_to_idx     = { L = 0, R = 1, B = 2 }
+local CHANNELS      = "L (Left)\0R (Right)\0B (Both)\0C (Center)\0"
+local CHANNEL_KEYS  = { "L", "R", "B", "C" }
+local ch_to_idx     = { L = 0, R = 1, B = 2, C = 3 }
 
 local FORMATS       = "MP3\0WAV\0FLAC\0"
 local FORMAT_KEYS   = { "mp3", "wav", "flac" }
@@ -219,21 +219,6 @@ local function draw_preset_editor()
   if reaper.ImGui_RadioButton(ctx, "Project##sc_p", preset.scope == "project") then
     preset.scope = "project"
   end
-
-  -- ── Format + Bitrate ─────────────────────────────────────────────────────
-  reaper.ImGui_Spacing(ctx)
-  reaper.ImGui_PushItemWidth(ctx, 72)
-  local fc, fi = reaper.ImGui_Combo(ctx, "Format##fmt", fmt_to_idx[preset.format] or 0, FORMATS)
-  if fc then preset.format = FORMAT_KEYS[fi + 1] end
-  reaper.ImGui_SameLine(ctx)
-  -- Only show bitrate for lossy formats
-  if preset.format == "mp3" or preset.format == "ogg" then
-    local bc, bi = reaper.ImGui_Combo(ctx, "Bitrate##br", br_to_idx[preset.bitrate] or 3, BITRATES)
-    if bc then preset.bitrate = BITRATE_KEYS[bi + 1] end
-  else
-    reaper.ImGui_TextDisabled(ctx, "(lossless)")
-  end
-  reaper.ImGui_PopItemWidth(ctx)
 
   reaper.ImGui_Separator(ctx)
   reaper.ImGui_Text(ctx, "TRACK ROUTING")
@@ -362,10 +347,18 @@ local function draw_settings()
   reaper.ImGui_Text(ctx, "Common export folder  (used for all projects)")
   reaper.ImGui_TextDisabled(ctx, "  Leave blank to export next to the project file.")
   reaper.ImGui_Spacing(ctx)
-  reaper.ImGui_PushItemWidth(ctx, -1)
+  reaper.ImGui_PushItemWidth(ctx, -50)
   local gc, gv = reaper.ImGui_InputText(ctx, "##g_exp", md_ref.global_export_path or "")
   reaper.ImGui_PopItemWidth(ctx)
   if gc then md_ref.global_export_path = gv end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "Browse##g_browse", 45, 0) then
+    reaper.UI_BrowseForFolder("Select common export folder", md_ref.global_export_path or "", 0, function(result)
+      if result and result ~= "" then
+        md_ref.global_export_path = result
+      end
+    end)
+  end
 
   reaper.ImGui_Spacing(ctx)
 
@@ -373,10 +366,37 @@ local function draw_settings()
   reaper.ImGui_Text(ctx, "Project export folder  (overrides common for this project only)")
   reaper.ImGui_TextDisabled(ctx, "  Leave blank to use the common folder above.")
   reaper.ImGui_Spacing(ctx)
-  reaper.ImGui_PushItemWidth(ctx, -1)
+  reaper.ImGui_PushItemWidth(ctx, -50)
   local pc, pv = reaper.ImGui_InputText(ctx, "##p_exp", md_ref.project_export_path or "")
   reaper.ImGui_PopItemWidth(ctx)
   if pc then md_ref.project_export_path = pv end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "Browse##p_browse", 45, 0) then
+    reaper.UI_BrowseForFolder("Select project export folder", md_ref.project_export_path or "", 0, function(result)
+      if result and result ~= "" then
+        md_ref.project_export_path = result
+      end
+    end)
+  end
+
+  reaper.ImGui_Spacing(ctx)
+  reaper.ImGui_Separator(ctx)
+  reaper.ImGui_Spacing(ctx)
+
+  -- ── Format + Bitrate (global settings) ────────────────────────────────────
+  reaper.ImGui_Text(ctx, "DEFAULT EXPORT FORMAT")
+  reaper.ImGui_PushItemWidth(ctx, 72)
+  local fc, fi = reaper.ImGui_Combo(ctx, "Format##fmt_global", fmt_to_idx[md_ref.format] or 0, FORMATS)
+  if fc then md_ref.format = FORMAT_KEYS[fi + 1] end
+  reaper.ImGui_SameLine(ctx)
+  -- Only show bitrate for lossy formats
+  if md_ref.format == "mp3" or md_ref.format == "ogg" then
+    local bc, bi = reaper.ImGui_Combo(ctx, "Bitrate##br_global", br_to_idx[md_ref.bitrate] or 3, BITRATES)
+    if bc then md_ref.bitrate = BITRATE_KEYS[bi + 1] end
+  else
+    reaper.ImGui_TextDisabled(ctx, "(lossless)")
+  end
+  reaper.ImGui_PopItemWidth(ctx)
 
   reaper.ImGui_Spacing(ctx)
   reaper.ImGui_Separator(ctx)

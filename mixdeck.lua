@@ -23,6 +23,8 @@ local md = {
   presets = {},             -- Merged view: global + project (read-only, rebuilt on load/save)
   global_export_path = "", -- Common output folder for all projects
   project_export_path = "",-- Per-project output folder override
+  format = "mp3",           -- Global default format for exports
+  bitrate = "320k",         -- Global default bitrate for MP3/OGG
   config_file = "",
   current_project = "",
   ui_open = false,
@@ -141,11 +143,13 @@ local function load_config_file(path)
 end
 
 local function load_config()
-  -- Load global config (presets + global export path)
+  -- Load global config (presets + global export path + format settings)
   local global_path = get_global_config_path()
   local global_data = load_config_file(global_path)
   md.global_presets = global_data.presets or {}
   md.global_export_path = global_data.export_path or ""
+  md.format = global_data.format or "mp3"
+  md.bitrate = global_data.bitrate or "320k"
   log("Loaded " .. #md.global_presets .. " global presets from: " .. global_path, "INFO")
 
   -- Load project config (presets + project export path override)
@@ -248,6 +252,11 @@ local function save_config(scope)
     export_path = export_path_val,
     timestamp = os.time()
   }
+  -- Add format/bitrate only to global config
+  if scope == "global" then
+    data.format = md.format
+    data.bitrate = md.bitrate
+  end
   file:write(json_encode(data))
   file:close()
   log("Saved " .. scope .. " config to: " .. path, "INFO")
@@ -274,17 +283,24 @@ local function create_preset(name, scope)
     end
   end
 
+  -- Auto-populate routing with all project tracks, set to center by default
+  local routing = {}
+  local all_tracks = get_all_tracks()
+  for _, track_info in ipairs(all_tracks) do
+    routing[track_info.name] = "C"  -- C = Center (default)
+  end
+
   local preset = {
     name = name,
     scope = scope,
-    routing = {},
-    format = "mp3",
-    bitrate = "320k",
+    routing = routing,
+    format = md.format,       -- Use global format setting
+    bitrate = md.bitrate,     -- Use global bitrate setting
     timestamp = os.time(),
   }
 
   save_preset_to_scope(preset, scope)
-  log("Created " .. scope .. " preset: " .. name, "INFO")
+  log("Created " .. scope .. " preset: " .. name .. " with " .. #all_tracks .. " tracks", "INFO")
   return preset
 end
 
@@ -493,8 +509,8 @@ local function configure_render(preset, out_path)
   reaper.GetSetProjectInfo_String(0, "RENDER_FILE",    out_path, true)
   reaper.GetSetProjectInfo_String(0, "RENDER_PATTERN", "",       true)  -- no additional pattern
 
-  -- Format
-  local fmt_str = get_render_format_string(preset.format, preset.bitrate)
+  -- Format (use global settings, not per-preset)
+  local fmt_str = get_render_format_string(md.format, md.bitrate)
   reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", fmt_str, true)
 
   -- Render entire project, stereo, master mix only
@@ -606,7 +622,8 @@ local function apply_routing(preset)
     elseif ch == "R" then
       reaper.SetMediaTrackInfo_Value(track, "D_PAN",   1.0)
       reaper.SetMediaTrackInfo_Value(track, "B_MUTE",  0)
-    elseif ch == "B" then
+    elseif ch == "B" or ch == "C" then
+      -- B = Both channels, C = Center: both center the pan
       reaper.SetMediaTrackInfo_Value(track, "D_PAN",   0.0)
       reaper.SetMediaTrackInfo_Value(track, "B_MUTE",  0)
     else
@@ -657,7 +674,7 @@ local function export_preset(preset)
   reaper.UpdateArrange()
 
   -- Verify output was created
-  local expected = out_stem .. "." .. preset.format
+  local expected = out_stem .. "." .. md.format
   local f = io.open(expected, "r")
   if f then
     f:close()
