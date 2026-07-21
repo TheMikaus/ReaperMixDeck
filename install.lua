@@ -29,6 +29,10 @@ local function reaimgui_version_ok()
   return (maj > req_maj) or (maj == req_maj and min >= req_min)
 end
 
+local function reappack_installed()
+  return reaper.APIExists("ReaPack_GetOwner")
+end
+
 local function get_script_dir()
   return debug.getinfo(1).source:match("@?(.*/?)") or ""
 end
@@ -53,45 +57,55 @@ local function check_deps()
   msg("=== MixDeck Installer v" .. MIXDECK_VERSION .. " ===")
   msg("")
 
+  -- Check for ReaPack first (makes ReaImGui installation easier)
+  if not reappack_installed() then
+    msg("⚠️   ReaPack (package manager) not found.")
+    msg("")
+    msg("    ReaPack makes installing extensions much easier.")
+    msg("    Please install ReaPack first:")
+    msg("")
+    msg("    1. Download:  https://reapack.com/")
+    msg("    2. Extract to: " .. reaper.GetResourcePath() .. "/UserPlugins/")
+    msg("    3. Restart Reaper")
+    msg("    4. Run this installer again")
+    msg("")
+    return false
+  else
+    msg("✅  ReaPack found")
+  end
+
+  msg("")
+
   -- ReaImGui check
   if not reaimgui_installed() then
     msg("❌  ReaImGui NOT found.")
     msg("")
     msg("    MixDeck requires the ReaImGui extension.")
     msg("")
-    
-    -- Try to open ReaPack browser
-    local browse_cmd = nil
-    
-    -- Try to find ReaPack: Browse packages command
-    if reaper.NamedCommandLookup then
-      browse_cmd = reaper.NamedCommandLookup("_REAPK_BROWSEPKGS")
-    end
-    
-    if browse_cmd and browse_cmd > 0 then
-      msg("    Opening ReaPack browser now...")
-      msg("")
-      reaper.Main_OnCommand(browse_cmd, 0)
-    else
-      msg("    Please install ReaImGui:")
-      msg("")
-      msg("    1. In Reaper, go to:  Extensions > ReaPack > Browse packages")
-      msg("    2. Search for:        ReaImGui")
-      msg("    3. Install by cfillion")
-      msg("    4. Restart Reaper")
-      msg("    5. Run this installer again")
-      msg("")
-    end
+    msg("    Please install ReaImGui:")
+    msg("")
+    msg("    1. In Reaper, search Actions for: 'ReaPack: Browse packages'")
+    msg("    2. Search for:        ReaImGui")
+    msg("    3. Click 'Install'")
+    msg("    4. Restart Reaper")
+    msg("    5. Run this installer again")
+    msg("")
+    msg("    OR install manually:")
+    msg("    1. Download:  https://github.com/cfillion/reaimgui/releases")
+    msg("    2. Extract to: " .. reaper.GetResourcePath() .. "/UserPlugins/")
+    msg("    3. Restart Reaper")
+    msg("    4. Run this installer again")
+    msg("")
     return false
   end
 
   if not reaimgui_version_ok() then
     msg("⚠️   ReaImGui found but version may be outdated (need >= " .. REAIMGUI_MIN .. ")")
-    msg("    Consider updating via Extensions > ReaPack > Synchronize packages")
+    msg("    Consider updating via ReaPack > Synchronize packages")
     msg("    Continuing install anyway...")
     msg("")
   else
-    msg("✅  ReaImGui found")
+    msg("✅  ReaImGui found (v" .. reaper.ImGui_GetVersion() .. ")")
   end
 
   return true
