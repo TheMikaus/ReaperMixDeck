@@ -37,8 +37,7 @@ end
 local function handle_keyboard()
   -- Ctrl+S: save preset
   if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_S()) then
-    local io = reaper.ImGui_GetIO(ctx)
-    if io.KeyCtrl then
+    if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl()) then
       local p = get_selected_preset()
       if p and not show_settings then
         fns.save_preset_to_scope(p, p.scope or "global")
@@ -48,8 +47,7 @@ local function handle_keyboard()
   end
   -- Ctrl+E: export preset
   if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_E()) then
-    local io = reaper.ImGui_GetIO(ctx)
-    if io.KeyCtrl then
+    if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl()) then
       local p = get_selected_preset()
       if p then
         local ok = fns.export_preset(p)
@@ -406,6 +404,13 @@ local new_scope_idx = 0  -- 0 = global, 1 = project
 
 local function draw_new_preset_popup()
   if show_new_popup then
+    -- Center the dialog over the MixDeck window
+    local win_x, win_y = reaper.ImGui_GetWindowPos(ctx)
+    local win_w = reaper.ImGui_GetWindowWidth(ctx)
+    local win_h = reaper.ImGui_GetWindowHeight(ctx)
+    local dialog_w = 300
+    local dialog_h = 160
+    reaper.ImGui_SetNextWindowPos(ctx, win_x + (win_w - dialog_w) / 2, win_y + (win_h - dialog_h) / 2, reaper.ImGui_Cond_Appearing())
     reaper.ImGui_OpenPopup(ctx, "New Preset##popup")
     show_new_popup = false  -- flag to open; ImGui manages visibility thereafter
   end
@@ -458,7 +463,7 @@ local function draw_new_preset_popup()
       reaper.ImGui_CloseCurrentPopup(ctx)
     end
 
-    reaper.ImGui_EndPopup(ctx)
+    reaper.ImGui_EndPopupModal(ctx)
   end
 end
 
