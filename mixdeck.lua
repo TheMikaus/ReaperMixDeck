@@ -4,7 +4,16 @@
 -- @version 1.0.0
 
 -- Load JSON utilities
-local json = dofile(debug.getinfo(1).source:match("@?(.*/?)") .. "json_utils.lua")
+local function get_script_dir()
+  local src = debug.getinfo(1).source
+  if src:sub(1, 1) == "@" then
+    src = src:sub(2)
+  end
+  local dir = src:match("(.*[/\\])")
+  return dir or ""
+end
+
+local json = dofile(get_script_dir() .. "json_utils.lua")
 
 local md = {
   version = "1.0.0",

@@ -201,22 +201,21 @@ local function register_action(install_dir)
   if cmd_id and cmd_id > 0 then
     msg("")
     msg("✅  Registered as Reaper action  (command ID: " .. cmd_id .. ")")
-    msg("    You can now find MixDeck in:  Actions > Action list")
-    msg("    Search for: MixDeck")
-    msg("    Assign a shortcut key if you like!")
+    msg("")
+    msg("  MixDeck is ready! To launch it:")
+    msg("  1. Press ? (or go to Actions > Action list)")
+    msg("  2. Search: MixDeck")
+    msg("  3. Double-click to run")
+    msg("")
+    msg("  (Optional: Assign a keyboard shortcut for quick access)")
+    return cmd_id
   else
     msg("")
     msg("⚠️   Could not auto-register action.")
     msg("    To run MixDeck manually:")
     msg("    Actions > Load ReaScript > " .. main_script)
+    return nil
   end
-  return install_dir .. "/mixdeck.lua"
-end
-
-local function launch_mixdeck(main_script_path)
-  msg("")
-  msg("  Launching MixDeck...")
-  reaper.dofile(main_script_path)
 end
 
 -- ============================================================================
@@ -233,13 +232,11 @@ local function run()
   local ok, install_dir = install_files()
 
   if ok then
-    local main_script = register_action(install_dir)
+    register_action(install_dir)
     msg("")
     msg("========================================")
     msg("  MixDeck v" .. MIXDECK_VERSION .. " installed successfully!")
     msg("========================================")
-    msg("")
-    launch_mixdeck(main_script)
   else
     msg("")
     msg("⚠️  Install completed with errors.")
