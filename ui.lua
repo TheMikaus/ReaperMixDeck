@@ -527,6 +527,14 @@ function ui.init(md, functions)
   md_ref = md
   fns    = functions
   ctx    = reaper.ImGui_CreateContext("MixDeck")
+  
+  -- If no presets exist, create a default one so UI isn't blank on first launch
+  if #md_ref.presets == 0 then
+    local default = fns.create_preset("Default Mix", "global")
+    if default then
+      sel_idx = 1  -- Select the default preset
+    end
+  end
 end
 
 function ui.destroy()
