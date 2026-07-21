@@ -22,8 +22,8 @@ local preview_active       = false  -- preview is playing
 local drag_src_idx         = nil    -- dragging preset from index
 
 local W_LEFT   = 195
-local WIN_W    = 800
-local WIN_H    = 600
+local WIN_W    = 900
+local WIN_H    = 700
 
 -- ============================================================================
 -- HELPERS
@@ -416,18 +416,18 @@ local function draw_new_preset_popup()
   if p_open then
     reaper.ImGui_Text(ctx, "Preset name:")
     reaper.ImGui_PushItemWidth(ctx, 280)
-    local nc, nv = reaper.ImGui_InputText(ctx, "##nn", new_preset_name_buf)
+    local nc, nv = reaper.ImGui_InputText(ctx, "##preset_name_input", new_preset_name_buf)
     if nc then new_preset_name_buf = nv end
     reaper.ImGui_PopItemWidth(ctx)
 
     reaper.ImGui_Spacing(ctx)
     reaper.ImGui_Text(ctx, "Scope:")
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Global (all projects)##ng", new_scope_idx == 0) then
+    if reaper.ImGui_RadioButton(ctx, "Global (all projects)##scope_global", new_scope_idx == 0) then
       new_scope_idx = 0
     end
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Project (this project only)##np", new_scope_idx == 1) then
+    if reaper.ImGui_RadioButton(ctx, "Project (this project only)##scope_project", new_scope_idx == 1) then
       new_scope_idx = 1
     end
 
@@ -436,19 +436,34 @@ local function draw_new_preset_popup()
     reaper.ImGui_Spacing(ctx)
 
     local scope = (new_scope_idx == 1) and "project" or "global"
-    if reaper.ImGui_Button(ctx, "Create##cr", 100, 0) then
+    local button_enabled = (new_preset_name_buf ~= "")
+    
+    if not button_enabled then
+      reaper.ImGui_BeginDisabled(ctx)
+    end
+    
+    if reaper.ImGui_Button(ctx, "Create", 100, 0) then
       if new_preset_name_buf ~= "" then
         local p = fns.create_preset(new_preset_name_buf, scope)
         if p then
           sel_idx       = #md_ref.presets
           show_settings = false
           set_status("Created " .. scope .. " preset: " .. new_preset_name_buf)
+          new_preset_name_buf = ""
+          new_scope_idx = 0
+          reaper.ImGui_CloseCurrentPopup(ctx)
         end
       end
-      reaper.ImGui_CloseCurrentPopup(ctx)
     end
+    
+    if not button_enabled then
+      reaper.ImGui_EndDisabled(ctx)
+    end
+    
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_Button(ctx, "Cancel##cc", 100, 0) then
+    if reaper.ImGui_Button(ctx, "Cancel", 100, 0) then
+      new_preset_name_buf = ""
+      new_scope_idx = 0
       reaper.ImGui_CloseCurrentPopup(ctx)
     end
 
@@ -461,6 +476,8 @@ end
 -- ============================================================================
 
 function ui.draw()
+  if not ctx then return false end
+  
   reaper.ImGui_SetNextWindowSize(ctx, WIN_W, WIN_H, reaper.ImGui_Cond_FirstUseEver())
 
   local visible, open = reaper.ImGui_Begin(ctx, "MixDeck  v" .. md_ref.version, true)

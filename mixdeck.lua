@@ -735,10 +735,15 @@ local ui = dofile(get_script_dir() .. "ui.lua")
 ui.init(md, fns)
 
 local function main_loop()
+  if not ctx then
+    -- Context destroyed, stop looping
+    return
+  end
   local open = ui.draw()
   if open then
     reaper.defer(main_loop)
   else
+    -- Window closed, clean up
     ui.destroy()
   end
 end
