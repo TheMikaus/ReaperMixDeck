@@ -34,7 +34,14 @@ local function reappack_installed()
 end
 
 local function get_script_dir()
-  return debug.getinfo(1).source:match("@?(.*/?)") or ""
+  local src = debug.getinfo(1).source
+  -- Remove @ prefix if present
+  if src:sub(1, 1) == "@" then
+    src = src:sub(2)
+  end
+  -- Get directory and ensure trailing slash
+  local dir = src:match("(.*[/\\])")
+  return dir or ""
 end
 
 local function copy_file(src, dst)
