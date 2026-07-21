@@ -54,7 +54,15 @@ end
 -- ============================================================================
 
 local function open_reapck_browser()
-  -- Try known ReaPack command IDs
+  -- Try ReaPack Lua API function first (more reliable)
+  if reaper.APIExists("ReaPack_ShowBrowser") then
+    reaper.ReaPack_ShowBrowser()
+    return true
+  end
+  
+  -- Fallback: Try known ReaPack command IDs
+  -- Note: ReaPack doesn't expose programmatic search/install via Lua API.
+  -- The browser GUI is opened, but user must search and install manually.
   local cmd_ids = {
     "_REAPK_BROWSEPKGS",  -- ReaPack: Browse packages (most common)
     "_REAPK_FETCH",       -- Alternative name
@@ -63,7 +71,6 @@ local function open_reapck_browser()
   for _, cmd_name in ipairs(cmd_ids) do
     local cmd_id = reaper.NamedCommandLookup(cmd_name)
     if cmd_id and cmd_id ~= 0 then
-      msg("    (Opening ReaPack browser...)")
       reaper.Main_OnCommand(cmd_id, 0)
       return true
     end
@@ -104,27 +111,29 @@ local function check_deps()
     
     -- Try to open ReaPack browser automatically
     if open_reapck_browser() then
-      msg("    ReaPack browser is now open.")
+      msg("    ✅ ReaPack browser opened!")
       msg("")
-      msg("    In the browser:")
-      msg("    1. Search for:  ReaImGui")
-      msg("    2. Click Install")
-      msg("    3. Restart Reaper")
-      msg("    4. Run this installer again")
-    else
-      msg("    Please install ReaImGui:")
-      msg("")
-      msg("    1. In Reaper, search Actions for: 'ReaPack: Browse packages'")
-      msg("    2. Search for:        ReaImGui")
+      msg("    Please search for and install ReaImGui:")
+      msg("    1. In the browser search box:  ReaImGui")
+      msg("    2. Click the ReaImGui entry")
       msg("    3. Click 'Install'")
       msg("    4. Restart Reaper")
       msg("    5. Run this installer again")
+    else
+      msg("    Please install ReaImGui manually:")
       msg("")
-      msg("    OR install manually:")
+      msg("    Option A: Use ReaPack (if installed)")
+      msg("    1. In Reaper, search Actions for: 'ReaPack: Browse packages'")
+      msg("    2. Search for:  ReaImGui")
+      msg("    3. Click 'Install'")
+      msg("")
+      msg("    Option B: Manual download")
       msg("    1. Download:  https://github.com/cfillion/reaimgui/releases")
       msg("    2. Extract to: " .. reaper.GetResourcePath() .. "/UserPlugins/")
-      msg("    3. Restart Reaper")
-      msg("    4. Run this installer again")
+      msg("")
+      msg("    After installing:")
+      msg("    1. Restart Reaper")
+      msg("    2. Run this installer again")
     end
     msg("")
     return false
