@@ -117,7 +117,9 @@ end
 
 local function draw_preset_list()
   -- Reserve 32px at bottom for the two buttons
-  reaper.ImGui_BeginChild(ctx, "##presets", W_LEFT, -32, child_border_flag())
+  -- Height = available window height - buttons area (32px)
+  local list_height = reaper.ImGui_GetWindowHeight(ctx) - reaper.ImGui_GetCursorPosY(ctx) - 50
+  reaper.ImGui_BeginChild(ctx, "##presets", W_LEFT, list_height, child_border_flag())
 
   reaper.ImGui_Text(ctx, "PRESETS")
   reaper.ImGui_TextDisabled(ctx, "(drag to reorder)")
@@ -485,13 +487,20 @@ function ui.draw()
     -- Handle keyboard shortcuts
     handle_keyboard()
 
+    -- Save the starting Y position for both panels to align them horizontally
+    local panel_start_y = reaper.ImGui_GetCursorPosY(ctx)
+    local panel_start_x = reaper.ImGui_GetCursorPosX(ctx)
+    local avail_height = reaper.ImGui_GetWindowHeight(ctx) - panel_start_y - 50  -- leave 50px for status bar
+    
     -- ── Left panel ──────────────────────────────────────────────────────────
     draw_preset_list()
 
     -- ── Right panel ─────────────────────────────────────────────────────────
-    reaper.ImGui_SameLine(ctx, 0, 8)
-    -- Use 0 for width to fill remaining space automatically
-    reaper.ImGui_BeginChild(ctx, "##right_panel", 0, -50, child_border_flag())
+    -- Restore Y to align with left panel, move X to the right
+    reaper.ImGui_SetCursorPosY(ctx, panel_start_y)
+    reaper.ImGui_SetCursorPosX(ctx, panel_start_x + W_LEFT + 8)
+    local right_panel_width = reaper.ImGui_GetWindowWidth(ctx) - (panel_start_x + W_LEFT + 8) - 8
+    reaper.ImGui_BeginChild(ctx, "##right_panel", right_panel_width, avail_height, child_border_flag())
 
     if show_settings then
       draw_settings()
