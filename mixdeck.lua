@@ -724,8 +724,7 @@ end
 init()
 
 -- Load and start the ImGui UI
-local script_path = debug.getinfo(1).source:match("@?(.*/?)")
-local ui = dofile(script_path .. "ui.lua")
+local ui = dofile(get_script_dir() .. "ui.lua")
 ui.init(md, fns)
 
 local function main_loop()
