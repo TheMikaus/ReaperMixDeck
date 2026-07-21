@@ -54,25 +54,12 @@ end
 -- ============================================================================
 
 local function open_reapck_browser()
-  -- Note: ReaPack doesn't expose programmatic search/install via Lua API.
-  -- We can only open the browser window via command or action.
-  
-  -- Try multiple known ReaPack command/action IDs
-  local attempts = {
-    { type = "named", id = "_REAPK_BROWSEPKGS" },
-    { type = "named", id = "_REAPK_BROWSE" },
-    { type = "named", id = "_REAPK_SHOWBROWSER" },
-  }
-  
-  for _, attempt in ipairs(attempts) do
-    local cmd_id = reaper.NamedCommandLookup(attempt.id)
-    if cmd_id and cmd_id ~= 0 then
-      msg("    (Opening ReaPack browser...)")
-      reaper.Main_OnCommand(cmd_id, 0)
-      return true
-    end
+  -- Try ReaPack: Browse packages command
+  local cmd_id = reaper.NamedCommandLookup("_REAPACK_BROWSE")
+  if cmd_id and cmd_id ~= 0 then
+    reaper.Main_OnCommand(cmd_id, 0)
+    return true
   end
-  
   return false
 end
 
@@ -108,11 +95,11 @@ local function check_deps()
     
     -- Try to open ReaPack browser automatically
     if open_reapck_browser() then
-      msg("    ✅ ReaPack browser should have opened!")
+      msg("    ✅ ReaPack browser opened!")
       msg("")
       msg("    Please search for and install ReaImGui:")
       msg("    1. In the browser search box:  ReaImGui")
-      msg("    2. Click the ReaImGui entry")
+      msg("    2. Click the ReaImGui entry by cfillion")
       msg("    3. Click 'Install'")
       msg("    4. Restart Reaper")
       msg("    5. Run this installer again")
@@ -123,7 +110,7 @@ local function check_deps()
       msg("    Option A: Use ReaPack")
       msg("    1. Open Reaper")
       msg("    2. Press ? to open Actions list")
-      msg("    3. Search: 'ReaPack' or 'Browse packages'")
+      msg("    3. Search: 'ReaPack' or 'Browse'")
       msg("    4. Double-click the ReaPack browser command")
       msg("    5. Search for: ReaImGui and Install")
       msg("")
