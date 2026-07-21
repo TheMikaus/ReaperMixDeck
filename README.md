@@ -49,20 +49,16 @@ With MixDeck:
 
 ## Installation
 
-1. **Install ReaImGui first (if not already present):**
-   - Open Reaper
-   - Look for **Extensions → ReaPack → Browse packages** (or try **Help → About REAPER → Show REAPER resource path**, then open `Scripts/Packages/ReaImGui` folder if it exists)
-   - If ReaPack isn't visible, you can **install it manually**: Download from [cfillion/reaimgui](https://github.com/cfillion/reaimgui/releases) and extract to `{Reaper resource path}/UserPlugins/`
-   - Search for `ReaImGui` and install by cfillion
-   - Restart Reaper
-
-2. **Run the MixDeck installer:**
+1. **Run the MixDeck installer:**
    - Open Reaper
    - **Actions → Load ReaScript**
    - Browse to `MixDeck/install.lua` and click **Run**
-   - The installer will verify ReaImGui is present, set up MixDeck, and **automatically open the window**
+   - If ReaImGui is missing, the installer will **automatically open the ReaPack package browser**
+   - Search for `ReaImGui` by cfillion and install it
+   - Restart Reaper
+   - Run the installer again — it will now set up MixDeck and **open the window automatically**
 
-3. **Future launches:**
+2. **Future launches:**
    - Find MixDeck in **Actions > Action list** (search: `MixDeck`)
    - Assign a keyboard shortcut for quick access
 
@@ -125,17 +121,11 @@ Output files: `{ProjectName}_{PresetName}.mp3` (or `.wav`, `.flac`)
 
 ## Troubleshooting
 
-**Can't find "Extensions → ReaPack" menu**
-→ ReaPack may not be installed. Try:
-   - **Help → ReaPack...** (some versions show it here)
-   - **Tools → ReaPack...** (other versions)
-   - If still not found, manually download ReaImGui from [cfillion/reaimgui](https://github.com/cfillion/reaimgui/releases) and extract to `{Reaper resource path}/UserPlugins/`
-
-**ReaImGui not found after installation**
-→ ReaImGui needs to be installed/enabled in Reaper before running MixDeck installer. Make sure you:
-   - Installed ReaImGui via ReaPack (or manually to UserPlugins)
-   - Restarted Reaper
-   - Check Reaper console (View → Show console) for any errors
+**ReaPack browser didn't open automatically**
+→ You can open it manually:
+   - **Extensions → ReaPack → Browse packages** (or **Help → ReaPack**, **Tools → ReaPack** depending on version)
+   - Search for `ReaImGui` by cfillion and install
+   - If ReaPack isn't visible at all, you may need to install it first from [cfillion/reapk](https://github.com/cfillion/reapk)
 
 **Tracks not routing correctly**
 → Track names in presets must match project track names exactly (case-sensitive)

@@ -58,13 +58,33 @@ local function check_deps()
     msg("❌  ReaImGui NOT found.")
     msg("")
     msg("    MixDeck requires the ReaImGui extension.")
-    msg("    To install it:")
+    msg("    Opening ReaPack package browser...")
     msg("")
-    msg("    1. In Reaper, go to:  Extensions > ReaPack > Browse packages")
-    msg("    2. Search for:        ReaImGui")
-    msg("    3. Install the package by cfillion")
-    msg("    4. Restart Reaper")
-    msg("    5. Run this installer again")
+    
+    -- Try to open ReaPack browser (command ID for "ReaPack: Browse packages")
+    local browse_cmd = nil
+    local cmd_name = "ReaPack: Browse packages"
+    
+    -- Search for the command ID
+    for i = 0, 65535 do
+      local name = reaper.GetCommandName(i)
+      if name and name:find("ReaPack") and name:find("Browse") then
+        browse_cmd = i
+        break
+      end
+    end
+    
+    if browse_cmd then
+      msg("    (Opening ReaPack browser now)")
+      reaper.Main_OnCommand(browse_cmd, 0)
+    else
+      msg("    Instructions:")
+      msg("    1. In Reaper, go to:  Extensions > ReaPack > Browse packages")
+      msg("    2. Search for:        ReaImGui")
+      msg("    3. Install by cfillion")
+      msg("    4. Restart Reaper")
+      msg("    5. Run this installer again")
+    end
     msg("")
     return false
   end
