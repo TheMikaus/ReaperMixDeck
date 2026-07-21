@@ -347,18 +347,10 @@ local function draw_settings()
   reaper.ImGui_Text(ctx, "Common export folder  (used for all projects)")
   reaper.ImGui_TextDisabled(ctx, "  Leave blank to export next to the project file.")
   reaper.ImGui_Spacing(ctx)
-  reaper.ImGui_PushItemWidth(ctx, -50)
+  reaper.ImGui_PushItemWidth(ctx, -1)
   local gc, gv = reaper.ImGui_InputText(ctx, "##g_exp", md_ref.global_export_path or "")
   reaper.ImGui_PopItemWidth(ctx)
   if gc then md_ref.global_export_path = gv end
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "Browse##g_browse", 45, 0) then
-    reaper.UI_BrowseForFolder("Select common export folder", md_ref.global_export_path or "", 0, function(result)
-      if result and result ~= "" then
-        md_ref.global_export_path = result
-      end
-    end)
-  end
 
   reaper.ImGui_Spacing(ctx)
 
@@ -366,18 +358,10 @@ local function draw_settings()
   reaper.ImGui_Text(ctx, "Project export folder  (overrides common for this project only)")
   reaper.ImGui_TextDisabled(ctx, "  Leave blank to use the common folder above.")
   reaper.ImGui_Spacing(ctx)
-  reaper.ImGui_PushItemWidth(ctx, -50)
+  reaper.ImGui_PushItemWidth(ctx, -1)
   local pc, pv = reaper.ImGui_InputText(ctx, "##p_exp", md_ref.project_export_path or "")
   reaper.ImGui_PopItemWidth(ctx)
   if pc then md_ref.project_export_path = pv end
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "Browse##p_browse", 45, 0) then
-    reaper.UI_BrowseForFolder("Select project export folder", md_ref.project_export_path or "", 0, function(result)
-      if result and result ~= "" then
-        md_ref.project_export_path = result
-      end
-    end)
-  end
 
   reaper.ImGui_Spacing(ctx)
   reaper.ImGui_Separator(ctx)

@@ -264,6 +264,37 @@ local function save_config(scope)
 end
 
 -- ============================================================================
+-- TRACK INFORMATION (defined before PRESET MANAGEMENT so get_all_tracks is available)
+-- ============================================================================
+
+local function get_all_tracks()
+  local tracks = {}
+  local track_count = reaper.CountTracks(0)
+  for i = 0, track_count - 1 do
+    local track = reaper.GetTrack(0, i)
+    local retval, track_name = reaper.GetTrackName(track)
+    local is_folder = reaper.GetTrackDepth(track)
+    table.insert(tracks, {
+      index = i,
+      track = track,
+      name = track_name,
+      is_folder = is_folder,
+    })
+  end
+  return tracks
+end
+
+local function print_track_structure()
+  log("=== Track Structure ===", "INFO")
+  local tracks = get_all_tracks()
+  for _, info in ipairs(tracks) do
+    local indent = string.rep("  ", info.is_folder)
+    log(indent .. info.name, "INFO")
+  end
+  log("======================", "INFO")
+end
+
+-- ============================================================================
 -- PRESET MANAGEMENT
 -- ============================================================================
 
@@ -367,35 +398,6 @@ local function update_preset_routing(preset_name, track_name, channel)
   return true
 end
 
--- ============================================================================
--- TRACK INFORMATION
--- ============================================================================
-
-local function get_all_tracks()
-  local tracks = {}
-  local track_count = reaper.CountTracks(0)
-  for i = 0, track_count - 1 do
-    local track = reaper.GetTrack(0, i)
-    local retval, track_name = reaper.GetTrackName(track)
-    local is_folder = reaper.GetTrackDepth(track)
-    table.insert(tracks, {
-      index = i,
-      track = track,
-      name = track_name,
-      is_folder = is_folder,
-    })
-  end
-  return tracks
-end
-
-local function print_track_structure()
-  log("=== Track Structure ===", "INFO")
-  local tracks = get_all_tracks()
-  for _, info in ipairs(tracks) do
-    local indent = string.rep("  ", info.is_folder)
-    log(indent .. info.name, "INFO")
-  end
-  log("======================", "INFO")
 end
 
 -- ============================================================================
