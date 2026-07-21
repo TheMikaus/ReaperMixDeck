@@ -22,12 +22,18 @@ local preview_active       = false  -- preview is playing
 local drag_src_idx         = nil    -- dragging preset from index
 
 local W_LEFT   = 195
+local W_CENTER = 400  -- center column for editor
 local WIN_W    = 900
 local WIN_H    = 700
 
 -- ============================================================================
 -- HELPERS
 -- ============================================================================
+
+local function get_selected_preset()
+  if sel_idx < 1 or sel_idx > #md_ref.presets then return nil end
+  return md_ref.presets[sel_idx]
+end
 
 local function set_status(msg)
   status_msg    = msg
@@ -39,7 +45,7 @@ local function handle_keyboard()
   if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_S()) then
     if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl()) then
       local p = get_selected_preset()
-      if p and not show_settings then
+      if p then
         fns.save_preset_to_scope(p, p.scope or "global")
         set_status("Saved: " .. p.name)
       end
@@ -87,11 +93,6 @@ local function reorder_presets(from_idx, to_idx)
     fns.save_config("global")
   end
   set_status("Reordered preset")
-end
-
-local function get_selected_preset()
-  if sel_idx < 1 or sel_idx > #md_ref.presets then return nil end
-  return md_ref.presets[sel_idx]
 end
 
 -- Compat: border flag for BeginChild changed in ReaImGui 0.8+
@@ -152,10 +153,6 @@ local function draw_preset_list()
   end
 
   reaper.ImGui_Separator(ctx)
-  if reaper.ImGui_Selectable(ctx, "⚙  Settings##settings_sel", show_settings) then
-    show_settings = true
-    sel_idx       = 0
-  end
 
   reaper.ImGui_EndChild(ctx)
 
@@ -179,9 +176,9 @@ end
 -- RIGHT PANEL: PRESET EDITOR
 -- ============================================================================
 
-local CHANNELS      = "L (Left)\0R (Right)\0B (Both)\0C (Center)\0"
-local CHANNEL_KEYS  = { "L", "R", "B", "C" }
-local ch_to_idx     = { L = 0, R = 1, B = 2, C = 3 }
+local CHANNELS      = "L (Left)\0R (Right)\0C (Center)\0"
+local CHANNEL_KEYS  = { "L", "R", "C" }
+local ch_to_idx     = { L = 0, R = 1, B = 2, C = 2 }  -- B maps to index 2 (C)
 
 local FORMATS       = "MP3\0WAV\0FLAC\0"
 local FORMAT_KEYS   = { "mp3", "wav", "flac" }
@@ -232,20 +229,28 @@ local function draw_preset_editor()
     reaper.ImGui_TableSetupColumn(ctx, "##rm",    reaper.ImGui_TableColumnFlags_WidthFixed(), 26)
     reaper.ImGui_TableHeadersRow(ctx)
 
-    for track_name, channel in pairs(preset.routing) do
-      reaper.ImGui_TableNextRow(ctx)
-      reaper.ImGui_TableNextColumn(ctx)
-      reaper.ImGui_Text(ctx, track_name)
+    -- Display tracks in file order with nesting visualization
+    local all_tracks = fns.get_all_tracks()
+    for _, track_info in ipairs(all_tracks) do
+      if preset.routing[track_info.name] then
+        reaper.ImGui_TableNextRow(ctx)
+        reaper.ImGui_TableNextColumn(ctx)
+        
+        -- Show indentation for child tracks
+        local indent = string.rep("  ", track_info.is_folder)
+        reaper.ImGui_Text(ctx, indent .. track_info.name)
 
-      reaper.ImGui_TableNextColumn(ctx)
-      reaper.ImGui_PushItemWidth(ctx, 100)
-      local cc, ci = reaper.ImGui_Combo(ctx, "##ch_" .. track_name, ch_to_idx[channel] or 0, CHANNELS)
-      if cc then preset.routing[track_name] = CHANNEL_KEYS[ci + 1] end
-      reaper.ImGui_PopItemWidth(ctx)
+        reaper.ImGui_TableNextColumn(ctx)
+        reaper.ImGui_PushItemWidth(ctx, 100)
+        local channel = preset.routing[track_info.name]
+        local cc, ci = reaper.ImGui_Combo(ctx, "##ch_" .. track_info.name, ch_to_idx[channel] or 0, CHANNELS)
+        if cc then preset.routing[track_info.name] = CHANNEL_KEYS[ci + 1] end
+        reaper.ImGui_PopItemWidth(ctx)
 
-      reaper.ImGui_TableNextColumn(ctx)
-      if reaper.ImGui_SmallButton(ctx, "x##x_" .. track_name) then
-        to_remove = track_name
+        reaper.ImGui_TableNextColumn(ctx)
+        if reaper.ImGui_SmallButton(ctx, "x##x_" .. track_info.name) then
+          to_remove = track_info.name
+        end
       end
     end
 
@@ -254,7 +259,7 @@ local function draw_preset_editor()
     reaper.ImGui_TableNextColumn(ctx)
     reaper.ImGui_TextDisabled(ctx, "(everything else)")
     reaper.ImGui_TableNextColumn(ctx)
-    reaper.ImGui_TextDisabled(ctx, "opposite channel")
+    reaper.ImGui_TextDisabled(ctx, "center")
     reaper.ImGui_TableNextColumn(ctx)
 
     reaper.ImGui_EndTable(ctx)
@@ -491,27 +496,28 @@ function ui.draw()
     -- Handle keyboard shortcuts
     handle_keyboard()
 
-    -- Save the starting Y position for both panels to align them horizontally
+    -- Save the starting Y position for all three panels to align them horizontally
     local panel_start_y = reaper.ImGui_GetCursorPosY(ctx)
     local panel_start_x = reaper.ImGui_GetCursorPosX(ctx)
     local avail_height = reaper.ImGui_GetWindowHeight(ctx) - panel_start_y - 50  -- leave 50px for status bar
     
-    -- ── Left panel ──────────────────────────────────────────────────────────
+    -- ── Left panel: Presets List ────────────────────────────────────────────
     draw_preset_list()
 
-    -- ── Right panel ─────────────────────────────────────────────────────────
-    -- Restore Y to align with left panel, move X to the right
+    -- ── Center panel: Preset Editor ────────────────────────────────────────
     reaper.ImGui_SetCursorPosY(ctx, panel_start_y)
-    reaper.ImGui_SetCursorPosX(ctx, panel_start_x + W_LEFT + 8)
-    local right_panel_width = reaper.ImGui_GetWindowWidth(ctx) - (panel_start_x + W_LEFT + 8) - 8
-    reaper.ImGui_BeginChild(ctx, "##right_panel", right_panel_width, avail_height, child_border_flag())
+    reaper.ImGui_SetCursorPosX(ctx, panel_start_x + W_LEFT + 4)
+    local center_width = W_CENTER
+    reaper.ImGui_BeginChild(ctx, "##center_panel", center_width, avail_height, child_border_flag())
+    draw_preset_editor()
+    reaper.ImGui_EndChild(ctx)
 
-    if show_settings then
-      draw_settings()
-    else
-      draw_preset_editor()
-    end
-
+    -- ── Right panel: Settings ──────────────────────────────────────────────
+    reaper.ImGui_SetCursorPosY(ctx, panel_start_y)
+    reaper.ImGui_SetCursorPosX(ctx, panel_start_x + W_LEFT + 4 + center_width + 4)
+    local right_width = reaper.ImGui_GetWindowWidth(ctx) - (panel_start_x + W_LEFT + 4 + center_width + 4) - 8
+    reaper.ImGui_BeginChild(ctx, "##right_panel", right_width, avail_height, child_border_flag())
+    draw_settings()
     reaper.ImGui_EndChild(ctx)
 
     -- ── Status bar ───────────────────────────────────────────────────────────
