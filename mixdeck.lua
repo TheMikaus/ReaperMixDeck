@@ -398,8 +398,6 @@ local function update_preset_routing(preset_name, track_name, channel)
   return true
 end
 
-end
-
 -- ============================================================================
 -- EXPORT LOGIC
 -- ============================================================================
