@@ -60,11 +60,11 @@ With MixDeck:
    - Open Reaper
    - **Actions → Load ReaScript**
    - Browse to `MixDeck/install.lua` and click **Run**
-   - The installer will verify ReaImGui is present and set up MixDeck
+   - The installer will verify ReaImGui is present, set up MixDeck, and **automatically open the window**
 
-3. **Open MixDeck:**
-   - Actions → Action list (search: `MixDeck`)
-   - Double-click to open, or assign a keyboard shortcut
+3. **Future launches:**
+   - Find MixDeck in **Actions > Action list** (search: `MixDeck`)
+   - Assign a keyboard shortcut for quick access
 
 ## Quick Start
 

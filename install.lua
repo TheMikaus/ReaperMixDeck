@@ -146,6 +146,13 @@ local function register_action(install_dir)
     msg("    To run MixDeck manually:")
     msg("    Actions > Load ReaScript > " .. main_script)
   end
+  return install_dir .. "/mixdeck.lua"
+end
+
+local function launch_mixdeck(main_script_path)
+  msg("")
+  msg("  Launching MixDeck...")
+  reaper.dofile(main_script_path)
 end
 
 -- ============================================================================
@@ -162,14 +169,13 @@ local function run()
   local ok, install_dir = install_files()
 
   if ok then
-    register_action(install_dir)
+    local main_script = register_action(install_dir)
     msg("")
     msg("========================================")
     msg("  MixDeck v" .. MIXDECK_VERSION .. " installed successfully!")
     msg("========================================")
     msg("")
-    msg("  Open a project and run MixDeck from the Actions list.")
-    msg("")
+    launch_mixdeck(main_script)
   else
     msg("")
     msg("⚠️  Install completed with errors.")
