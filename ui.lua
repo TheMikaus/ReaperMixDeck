@@ -405,10 +405,10 @@ end
 local new_scope_idx = 0  -- 0 = global, 1 = project
 
 local function draw_new_preset_popup()
-  if not show_new_popup then return end
-
-  reaper.ImGui_OpenPopup(ctx, "New Preset##popup")
-  show_new_popup = false  -- only open once; popup manages its own visibility
+  if show_new_popup then
+    reaper.ImGui_OpenPopup(ctx, "New Preset##popup")
+    show_new_popup = false  -- flag to open; ImGui manages visibility thereafter
+  end
 
   local _, p_open = reaper.ImGui_BeginPopupModal(ctx, "New Preset##popup", true,
     reaper.ImGui_WindowFlags_AlwaysAutoResize())
@@ -485,7 +485,8 @@ function ui.draw()
 
     -- ── Right panel ─────────────────────────────────────────────────────────
     reaper.ImGui_SameLine(ctx, 0, 8)
-    reaper.ImGui_BeginGroup(ctx)
+    local right_panel_width = reaper.ImGui_GetWindowWidth(ctx) - W_LEFT - 30
+    reaper.ImGui_BeginChild(ctx, "##right_panel", right_panel_width, -40, child_border_flag())
 
     if show_settings then
       draw_settings()
@@ -493,10 +494,10 @@ function ui.draw()
       draw_preset_editor()
     end
 
-    reaper.ImGui_EndGroup(ctx)
+    reaper.ImGui_EndChild(ctx)
 
     -- ── Status bar ───────────────────────────────────────────────────────────
-    reaper.ImGui_SetCursorPosY(ctx, reaper.ImGui_GetWindowHeight(ctx) - 28)
+    reaper.ImGui_SetCursorPosY(ctx, reaper.ImGui_GetWindowHeight(ctx) - 32)
     reaper.ImGui_Separator(ctx)
     if reaper.time_precise() < status_expiry then
       reaper.ImGui_Text(ctx, status_msg)
@@ -525,7 +526,7 @@ end
 
 function ui.destroy()
   if ctx then
-    reaper.ImGui_DestroyContext(ctx)
+    -- ReaImGui manages context cleanup; we just clear our reference
     ctx = nil
   end
 end
