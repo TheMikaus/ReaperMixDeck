@@ -22,8 +22,8 @@ local preview_active       = false  -- preview is playing
 local drag_src_idx         = nil    -- dragging preset from index
 
 local W_LEFT   = 195
-local WIN_W    = 720
-local WIN_H    = 520
+local WIN_W    = 800
+local WIN_H    = 600
 
 -- ============================================================================
 -- HELPERS
@@ -118,8 +118,8 @@ end
 -- ============================================================================
 
 local function draw_preset_list()
-  -- Reserve 28px at bottom for the two buttons
-  reaper.ImGui_BeginChild(ctx, "##presets", W_LEFT, -28, child_border_flag())
+  -- Reserve 32px at bottom for the two buttons
+  reaper.ImGui_BeginChild(ctx, "##presets", W_LEFT, -32, child_border_flag())
 
   reaper.ImGui_Text(ctx, "PRESETS")
   reaper.ImGui_TextDisabled(ctx, "(drag to reorder)")
@@ -485,7 +485,7 @@ function ui.draw()
     reaper.ImGui_EndGroup(ctx)
 
     -- ── Status bar ───────────────────────────────────────────────────────────
-    reaper.ImGui_SetCursorPosY(ctx, reaper.ImGui_GetWindowHeight(ctx) - 22)
+    reaper.ImGui_SetCursorPosY(ctx, reaper.ImGui_GetWindowHeight(ctx) - 28)
     reaper.ImGui_Separator(ctx)
     if reaper.time_precise() < status_expiry then
       reaper.ImGui_Text(ctx, status_msg)
