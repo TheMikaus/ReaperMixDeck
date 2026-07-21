@@ -53,6 +53,25 @@ end
 -- DEPENDENCY CHECK
 -- ============================================================================
 
+local function open_reapck_browser()
+  -- Try known ReaPack command IDs
+  local cmd_ids = {
+    "_REAPK_BROWSEPKGS",  -- ReaPack: Browse packages (most common)
+    "_REAPK_FETCH",       -- Alternative name
+  }
+  
+  for _, cmd_name in ipairs(cmd_ids) do
+    local cmd_id = reaper.NamedCommandLookup(cmd_name)
+    if cmd_id and cmd_id ~= 0 then
+      msg("    (Opening ReaPack browser...)")
+      reaper.Main_OnCommand(cmd_id, 0)
+      return true
+    end
+  end
+  
+  return false
+end
+
 local function check_deps()
   msg("=== MixDeck Installer v" .. MIXDECK_VERSION .. " ===")
   msg("")
@@ -82,19 +101,31 @@ local function check_deps()
     msg("")
     msg("    MixDeck requires the ReaImGui extension.")
     msg("")
-    msg("    Please install ReaImGui:")
-    msg("")
-    msg("    1. In Reaper, search Actions for: 'ReaPack: Browse packages'")
-    msg("    2. Search for:        ReaImGui")
-    msg("    3. Click 'Install'")
-    msg("    4. Restart Reaper")
-    msg("    5. Run this installer again")
-    msg("")
-    msg("    OR install manually:")
-    msg("    1. Download:  https://github.com/cfillion/reaimgui/releases")
-    msg("    2. Extract to: " .. reaper.GetResourcePath() .. "/UserPlugins/")
-    msg("    3. Restart Reaper")
-    msg("    4. Run this installer again")
+    
+    -- Try to open ReaPack browser automatically
+    if open_reapck_browser() then
+      msg("    ReaPack browser is now open.")
+      msg("")
+      msg("    In the browser:")
+      msg("    1. Search for:  ReaImGui")
+      msg("    2. Click Install")
+      msg("    3. Restart Reaper")
+      msg("    4. Run this installer again")
+    else
+      msg("    Please install ReaImGui:")
+      msg("")
+      msg("    1. In Reaper, search Actions for: 'ReaPack: Browse packages'")
+      msg("    2. Search for:        ReaImGui")
+      msg("    3. Click 'Install'")
+      msg("    4. Restart Reaper")
+      msg("    5. Run this installer again")
+      msg("")
+      msg("    OR install manually:")
+      msg("    1. Download:  https://github.com/cfillion/reaimgui/releases")
+      msg("    2. Extract to: " .. reaper.GetResourcePath() .. "/UserPlugins/")
+      msg("    3. Restart Reaper")
+      msg("    4. Run this installer again")
+    end
     msg("")
     return false
   end
