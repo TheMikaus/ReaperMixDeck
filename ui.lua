@@ -491,7 +491,8 @@ function ui.draw()
     -- ── Right panel ─────────────────────────────────────────────────────────
     reaper.ImGui_SameLine(ctx, 0, 8)
     local right_panel_width = reaper.ImGui_GetWindowWidth(ctx) - W_LEFT - 30
-    reaper.ImGui_BeginChild(ctx, "##right_panel", right_panel_width, -40, child_border_flag())
+    -- Reserve 50px for status bar area (buttons + status + separator)
+    reaper.ImGui_BeginChild(ctx, "##right_panel", right_panel_width, -50, child_border_flag())
 
     if show_settings then
       draw_settings()
@@ -502,7 +503,7 @@ function ui.draw()
     reaper.ImGui_EndChild(ctx)
 
     -- ── Status bar ───────────────────────────────────────────────────────────
-    reaper.ImGui_SetCursorPosY(ctx, reaper.ImGui_GetWindowHeight(ctx) - 32)
+    reaper.ImGui_SetCursorPosY(ctx, reaper.ImGui_GetWindowHeight(ctx) - 46)
     reaper.ImGui_Separator(ctx)
     if reaper.time_precise() < status_expiry then
       reaper.ImGui_Text(ctx, status_msg)
