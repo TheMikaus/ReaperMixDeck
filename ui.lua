@@ -490,9 +490,8 @@ function ui.draw()
 
     -- ── Right panel ─────────────────────────────────────────────────────────
     reaper.ImGui_SameLine(ctx, 0, 8)
-    local right_panel_width = reaper.ImGui_GetWindowWidth(ctx) - W_LEFT - 30
-    -- Reserve 50px for status bar area (buttons + status + separator)
-    reaper.ImGui_BeginChild(ctx, "##right_panel", right_panel_width, -50, child_border_flag())
+    -- Use 0 for width to fill remaining space automatically
+    reaper.ImGui_BeginChild(ctx, "##right_panel", 0, -50, child_border_flag())
 
     if show_settings then
       draw_settings()
