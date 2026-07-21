@@ -436,11 +436,6 @@ local function draw_new_preset_popup()
     reaper.ImGui_Spacing(ctx)
 
     local scope = (new_scope_idx == 1) and "project" or "global"
-    local button_enabled = (new_preset_name_buf ~= "")
-    
-    if not button_enabled then
-      reaper.ImGui_BeginDisabled(ctx)
-    end
     
     if reaper.ImGui_Button(ctx, "Create", 100, 0) then
       if new_preset_name_buf ~= "" then
@@ -454,10 +449,6 @@ local function draw_new_preset_popup()
           reaper.ImGui_CloseCurrentPopup(ctx)
         end
       end
-    end
-    
-    if not button_enabled then
-      reaper.ImGui_EndDisabled(ctx)
     end
     
     reaper.ImGui_SameLine(ctx)
@@ -476,7 +467,10 @@ end
 -- ============================================================================
 
 function ui.draw()
-  if not ctx then return false end
+  if not ctx then
+    -- Context not initialized or was destroyed
+    return false
+  end
   
   reaper.ImGui_SetNextWindowSize(ctx, WIN_W, WIN_H, reaper.ImGui_Cond_FirstUseEver())
 
