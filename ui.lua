@@ -176,9 +176,9 @@ end
 -- RIGHT PANEL: PRESET EDITOR
 -- ============================================================================
 
-local CHANNELS      = "L (Left)\0R (Right)\0C (Center)\0"
-local CHANNEL_KEYS  = { "L", "R", "C" }
-local ch_to_idx     = { L = 0, R = 1, B = 2, C = 2 }  -- B maps to index 2 (C)
+local CHANNELS      = "L (Left)\0R (Right)\0C (Center)\0None (Mute)\0"
+local CHANNEL_KEYS  = { "L", "R", "C", "none" }
+local ch_to_idx     = { L = 0, R = 1, B = 2, C = 2, none = 3 }  -- B maps to C
 
 local FORMATS       = "MP3\0WAV\0FLAC\0"
 local FORMAT_KEYS   = { "mp3", "wav", "flac" }

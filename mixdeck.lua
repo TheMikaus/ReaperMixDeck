@@ -623,11 +623,10 @@ local function apply_routing(preset)
       reaper.SetMediaTrackInfo_Value(track, "D_PAN",   1.0)
       reaper.SetMediaTrackInfo_Value(track, "B_MUTE",  0)
     elseif ch == "B" or ch == "C" then
-      -- B = Both channels, C = Center: both center the pan
       reaper.SetMediaTrackInfo_Value(track, "D_PAN",   0.0)
       reaper.SetMediaTrackInfo_Value(track, "B_MUTE",  0)
     else
-      -- Not mapped and no implicit side: mute it
+      -- "none" or unmapped: mute
       reaper.SetMediaTrackInfo_Value(track, "B_MUTE",  1)
     end
   end
