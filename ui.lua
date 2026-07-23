@@ -114,7 +114,6 @@ end
 
 -- Color scheme for track table
 local TABLE_COLORS = {
-  header      = 0xFF5A5A5A,  -- lightish gray for headers
   parent      = 0xFF3A3A3A,  -- medium gray for parents
   child       = 0xFF2A2A2A,  -- darker gray for children
   hover       = 0xFF5A5A5A,  -- bright gray for hover
@@ -236,9 +235,6 @@ local function draw_preset_editor()
     reaper.ImGui_TableSetupColumn(ctx, "Track",   reaper.ImGui_TableColumnFlags_WidthStretch())
     reaper.ImGui_TableSetupColumn(ctx, "Channel", reaper.ImGui_TableColumnFlags_WidthFixed(), 105)
     reaper.ImGui_TableSetupColumn(ctx, "##rm",    reaper.ImGui_TableColumnFlags_WidthFixed(), 26)
-    
-    -- Color the header row
-    reaper.ImGui_TableSetBgColor(ctx, reaper.ImGui_TableBgTarget_HeaderBg(), TABLE_COLORS.header)
     reaper.ImGui_TableHeadersRow(ctx)
 
     -- Display tracks in file order with nesting visualization
