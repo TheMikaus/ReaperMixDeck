@@ -114,10 +114,10 @@ end
 
 -- Color scheme for track table
 local TABLE_COLORS = {
-  parent      = 0xFF3A3A3A,  -- medium gray for parents
-  child       = 0xFF2A2A2A,  -- darker gray for children
-  hover       = 0xFF5A5A5A,  -- bright gray for hover
-  catchall    = 0xFF252525,  -- darker for catch-all
+  parent      = 0x3A3A3AFF,  -- medium gray for parents
+  child       = 0x2A2A2AFF,  -- darker gray for children
+  hover       = 0x5A5A5AFF,  -- bright gray for hover
+  catchall    = 0x252525FF,  -- darker for catch-all
 }
 
 -- ============================================================================
