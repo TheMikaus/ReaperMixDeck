@@ -234,11 +234,26 @@ local function draw_preset_editor()
     for _, track_info in ipairs(all_tracks) do
       if preset.routing[track_info.name] then
         reaper.ImGui_TableNextRow(ctx)
+        
         reaper.ImGui_TableNextColumn(ctx)
         
-        -- Show indentation for child tracks
-        local indent = string.rep("  ", track_info.is_folder)
+        -- Show indentation for child tracks (increased: 6 spaces per level)
+        local indent = string.rep("      ", track_info.is_folder)
         reaper.ImGui_Text(ctx, indent .. track_info.name)
+        
+        -- Check if this row is hovered
+        local is_hovered = reaper.ImGui_IsItemHovered(ctx)
+        
+        -- Color rows: parents one color, children another, with highlight on hover
+        local bg_color
+        if is_hovered then
+          bg_color = 0xFF4A4A4A  -- bright highlight on hover
+        elseif track_info.is_folder == 0 then
+          bg_color = 0xFF3A3A3A  -- darker gray for parents
+        else
+          bg_color = 0xFF2A2A2A  -- lighter gray for children
+        end
+        reaper.ImGui_TableSetBgColor(ctx, reaper.ImGui_TableBgTarget_RowBg0(), bg_color)
 
         reaper.ImGui_TableNextColumn(ctx)
         reaper.ImGui_PushItemWidth(ctx, 100)
@@ -256,6 +271,7 @@ local function draw_preset_editor()
 
     -- Implicit catch-all row
     reaper.ImGui_TableNextRow(ctx)
+    reaper.ImGui_TableSetBgColor(ctx, reaper.ImGui_TableBgTarget_RowBg0(), 0xFF252525)
     reaper.ImGui_TableNextColumn(ctx)
     reaper.ImGui_TextDisabled(ctx, "(everything else)")
     reaper.ImGui_TableNextColumn(ctx)
