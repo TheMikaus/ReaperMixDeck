@@ -252,21 +252,24 @@ local function draw_preset_editor()
         -- Show indentation for child tracks (6 spaces per level)
         local indent = string.rep("      ", track_info.is_folder)
         reaper.ImGui_Text(ctx, indent .. track_info.name)
+        local text_hovered = reaper.ImGui_IsItemHovered(ctx)
 
         reaper.ImGui_TableNextColumn(ctx)
         reaper.ImGui_PushItemWidth(ctx, 100)
         local channel = preset.routing[track_info.name]
         local cc, ci = reaper.ImGui_Combo(ctx, "##ch_" .. track_info.name, ch_to_idx[channel] or 0, CHANNELS)
         if cc then preset.routing[track_info.name] = CHANNEL_KEYS[ci + 1] end
+        local combo_hovered = reaper.ImGui_IsItemHovered(ctx)
         reaper.ImGui_PopItemWidth(ctx)
 
         reaper.ImGui_TableNextColumn(ctx)
         if reaper.ImGui_SmallButton(ctx, "x##x_" .. track_info.name) then
           to_remove = track_info.name
         end
+        local btn_hovered = reaper.ImGui_IsItemHovered(ctx)
         
-        -- Check if this row is hovered and apply highlight
-        if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_RectOnly()) then
+        -- If any cell in row is hovered, apply highlight to entire row
+        if text_hovered or combo_hovered or btn_hovered then
           reaper.ImGui_TableSetBgColor(ctx, reaper.ImGui_TableBgTarget_RowBg0(), TABLE_COLORS.hover)
         end
       end
