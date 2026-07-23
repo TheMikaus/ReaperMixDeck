@@ -112,6 +112,15 @@ local function table_flags()
   return f
 end
 
+-- Color scheme for track table
+local TABLE_COLORS = {
+  header      = 0xFF5A5A5A,  -- lightish gray for headers
+  parent      = 0xFF3A3A3A,  -- medium gray for parents
+  child       = 0xFF2A2A2A,  -- darker gray for children
+  hover       = 0xFF5A5A5A,  -- bright gray for hover
+  catchall    = 0xFF252525,  -- darker for catch-all
+}
+
 -- ============================================================================
 -- LEFT PANEL: PRESET LIST
 -- ============================================================================
@@ -227,6 +236,9 @@ local function draw_preset_editor()
     reaper.ImGui_TableSetupColumn(ctx, "Track",   reaper.ImGui_TableColumnFlags_WidthStretch())
     reaper.ImGui_TableSetupColumn(ctx, "Channel", reaper.ImGui_TableColumnFlags_WidthFixed(), 105)
     reaper.ImGui_TableSetupColumn(ctx, "##rm",    reaper.ImGui_TableColumnFlags_WidthFixed(), 26)
+    
+    -- Color the header row
+    reaper.ImGui_TableSetBgColor(ctx, reaper.ImGui_TableBgTarget_HeaderBg(), TABLE_COLORS.header)
     reaper.ImGui_TableHeadersRow(ctx)
 
     -- Display tracks in file order with nesting visualization
@@ -235,25 +247,15 @@ local function draw_preset_editor()
       if preset.routing[track_info.name] then
         reaper.ImGui_TableNextRow(ctx)
         
+        -- Determine base color for this row
+        local bg_color = (track_info.is_folder == 0) and TABLE_COLORS.parent or TABLE_COLORS.child
+        reaper.ImGui_TableSetBgColor(ctx, reaper.ImGui_TableBgTarget_RowBg0(), bg_color)
+        
         reaper.ImGui_TableNextColumn(ctx)
         
-        -- Show indentation for child tracks (increased: 6 spaces per level)
+        -- Show indentation for child tracks (6 spaces per level)
         local indent = string.rep("      ", track_info.is_folder)
         reaper.ImGui_Text(ctx, indent .. track_info.name)
-        
-        -- Check if this row is hovered
-        local is_hovered = reaper.ImGui_IsItemHovered(ctx)
-        
-        -- Color rows: parents one color, children another, with highlight on hover
-        local bg_color
-        if is_hovered then
-          bg_color = 0xFF4A4A4A  -- bright highlight on hover
-        elseif track_info.is_folder == 0 then
-          bg_color = 0xFF3A3A3A  -- darker gray for parents
-        else
-          bg_color = 0xFF2A2A2A  -- lighter gray for children
-        end
-        reaper.ImGui_TableSetBgColor(ctx, reaper.ImGui_TableBgTarget_RowBg0(), bg_color)
 
         reaper.ImGui_TableNextColumn(ctx)
         reaper.ImGui_PushItemWidth(ctx, 100)
@@ -266,12 +268,17 @@ local function draw_preset_editor()
         if reaper.ImGui_SmallButton(ctx, "x##x_" .. track_info.name) then
           to_remove = track_info.name
         end
+        
+        -- Check if this row is hovered and apply highlight
+        if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_RectOnly()) then
+          reaper.ImGui_TableSetBgColor(ctx, reaper.ImGui_TableBgTarget_RowBg0(), TABLE_COLORS.hover)
+        end
       end
     end
 
     -- Implicit catch-all row
     reaper.ImGui_TableNextRow(ctx)
-    reaper.ImGui_TableSetBgColor(ctx, reaper.ImGui_TableBgTarget_RowBg0(), 0xFF252525)
+    reaper.ImGui_TableSetBgColor(ctx, reaper.ImGui_TableBgTarget_RowBg0(), TABLE_COLORS.catchall)
     reaper.ImGui_TableNextColumn(ctx)
     reaper.ImGui_TextDisabled(ctx, "(everything else)")
     reaper.ImGui_TableNextColumn(ctx)
