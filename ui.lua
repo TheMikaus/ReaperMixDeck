@@ -244,10 +244,18 @@ local function draw_preset_editor()
         reaper.ImGui_TableNextRow(ctx)
         reaper.ImGui_TableNextColumn(ctx)
         
-        -- Show indentation for child tracks (6 spaces per level)
+        -- Create selectable that spans all columns
         local indent = string.rep("      ", track_info.is_folder)
         local flags = reaper.ImGui_SelectableFlags_SpanAllColumns() | reaper.ImGui_SelectableFlags_AllowItemOverlap()
         reaper.ImGui_Selectable(ctx, indent .. track_info.name, false, flags)
+        
+        -- Check if row is hovered and set background color
+        if reaper.ImGui_IsItemHovered(ctx) then
+          reaper.ImGui_TableSetBgColor(ctx, reaper.ImGui_TableBgTarget_RowBg0(), TABLE_COLORS.hover)
+        else
+          local bg_color = (track_info.is_folder == 0) and TABLE_COLORS.parent or TABLE_COLORS.child
+          reaper.ImGui_TableSetBgColor(ctx, reaper.ImGui_TableBgTarget_RowBg0(), bg_color)
+        end
 
         reaper.ImGui_TableNextColumn(ctx)
         reaper.ImGui_PushItemWidth(ctx, 100)
@@ -265,9 +273,16 @@ local function draw_preset_editor()
 
     -- Implicit catch-all row
     reaper.ImGui_TableNextRow(ctx)
-    reaper.ImGui_TableSetBgColor(ctx, reaper.ImGui_TableBgTarget_RowBg0(), TABLE_COLORS.catchall)
     reaper.ImGui_TableNextColumn(ctx)
-    reaper.ImGui_TextDisabled(ctx, "(everything else)")
+    local flags = reaper.ImGui_SelectableFlags_SpanAllColumns() | reaper.ImGui_SelectableFlags_AllowItemOverlap()
+    reaper.ImGui_Selectable(ctx, "(everything else)", false, flags)
+    
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_TableSetBgColor(ctx, reaper.ImGui_TableBgTarget_RowBg0(), TABLE_COLORS.hover)
+    else
+      reaper.ImGui_TableSetBgColor(ctx, reaper.ImGui_TableBgTarget_RowBg0(), TABLE_COLORS.catchall)
+    end
+    
     reaper.ImGui_TableNextColumn(ctx)
     reaper.ImGui_TextDisabled(ctx, "center")
     reaper.ImGui_TableNextColumn(ctx)
