@@ -242,22 +242,12 @@ local function draw_preset_editor()
     for _, track_info in ipairs(all_tracks) do
       if preset.routing[track_info.name] then
         reaper.ImGui_TableNextRow(ctx)
-        
-        -- Check if row is hovered and set color immediately
-        local is_row_hovered = reaper.ImGui_IsItemHovered(ctx)
-        local bg_color
-        if is_row_hovered then
-          bg_color = TABLE_COLORS.hover
-        else
-          bg_color = (track_info.is_folder == 0) and TABLE_COLORS.parent or TABLE_COLORS.child
-        end
-        reaper.ImGui_TableSetBgColor(ctx, reaper.ImGui_TableBgTarget_RowBg0(), bg_color)
-        
         reaper.ImGui_TableNextColumn(ctx)
         
         -- Show indentation for child tracks (6 spaces per level)
         local indent = string.rep("      ", track_info.is_folder)
-        reaper.ImGui_Text(ctx, indent .. track_info.name)
+        local flags = reaper.ImGui_SelectableFlags_SpanAllColumns() | reaper.ImGui_SelectableFlags_AllowItemOverlap()
+        reaper.ImGui_Selectable(ctx, indent .. track_info.name, false, flags)
 
         reaper.ImGui_TableNextColumn(ctx)
         reaper.ImGui_PushItemWidth(ctx, 100)
