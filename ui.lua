@@ -243,8 +243,14 @@ local function draw_preset_editor()
       if preset.routing[track_info.name] then
         reaper.ImGui_TableNextRow(ctx)
         
-        -- Determine base color for this row
-        local bg_color = (track_info.is_folder == 0) and TABLE_COLORS.parent or TABLE_COLORS.child
+        -- Check if row is hovered and set color immediately
+        local is_row_hovered = reaper.ImGui_IsItemHovered(ctx)
+        local bg_color
+        if is_row_hovered then
+          bg_color = TABLE_COLORS.hover
+        else
+          bg_color = (track_info.is_folder == 0) and TABLE_COLORS.parent or TABLE_COLORS.child
+        end
         reaper.ImGui_TableSetBgColor(ctx, reaper.ImGui_TableBgTarget_RowBg0(), bg_color)
         
         reaper.ImGui_TableNextColumn(ctx)
@@ -252,25 +258,17 @@ local function draw_preset_editor()
         -- Show indentation for child tracks (6 spaces per level)
         local indent = string.rep("      ", track_info.is_folder)
         reaper.ImGui_Text(ctx, indent .. track_info.name)
-        local text_hovered = reaper.ImGui_IsItemHovered(ctx)
 
         reaper.ImGui_TableNextColumn(ctx)
         reaper.ImGui_PushItemWidth(ctx, 100)
         local channel = preset.routing[track_info.name]
         local cc, ci = reaper.ImGui_Combo(ctx, "##ch_" .. track_info.name, ch_to_idx[channel] or 0, CHANNELS)
         if cc then preset.routing[track_info.name] = CHANNEL_KEYS[ci + 1] end
-        local combo_hovered = reaper.ImGui_IsItemHovered(ctx)
         reaper.ImGui_PopItemWidth(ctx)
 
         reaper.ImGui_TableNextColumn(ctx)
         if reaper.ImGui_SmallButton(ctx, "x##x_" .. track_info.name) then
           to_remove = track_info.name
-        end
-        local btn_hovered = reaper.ImGui_IsItemHovered(ctx)
-        
-        -- If any cell in row is hovered, apply highlight to entire row
-        if text_hovered or combo_hovered or btn_hovered then
-          reaper.ImGui_TableSetBgColor(ctx, reaper.ImGui_TableBgTarget_RowBg0(), TABLE_COLORS.hover)
         end
       end
     end
