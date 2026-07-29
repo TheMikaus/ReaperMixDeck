@@ -246,8 +246,9 @@ local function draw_preset_editor()
         
         -- Create selectable that spans all columns
         local indent = string.rep("      ", track_info.is_folder)
+        local sel_id = indent .. track_info.name .. "##sel_" .. track_info.index
         local flags = reaper.ImGui_SelectableFlags_SpanAllColumns() | reaper.ImGui_SelectableFlags_AllowItemOverlap()
-        reaper.ImGui_Selectable(ctx, indent .. track_info.name, false, flags)
+        reaper.ImGui_Selectable(ctx, sel_id, false, flags)
         
         -- Check if row is hovered and set background color
         if reaper.ImGui_IsItemHovered(ctx) then
@@ -260,12 +261,14 @@ local function draw_preset_editor()
         reaper.ImGui_TableNextColumn(ctx)
         reaper.ImGui_PushItemWidth(ctx, 100)
         local channel = preset.routing[track_info.name]
-        local cc, ci = reaper.ImGui_Combo(ctx, "##ch_" .. track_info.name, ch_to_idx[channel] or 0, CHANNELS)
+        local combo_id = "##ch_" .. track_info.index .. "_" .. track_info.name
+        local cc, ci = reaper.ImGui_Combo(ctx, combo_id, ch_to_idx[channel] or 0, CHANNELS)
         if cc then preset.routing[track_info.name] = CHANNEL_KEYS[ci + 1] end
         reaper.ImGui_PopItemWidth(ctx)
 
         reaper.ImGui_TableNextColumn(ctx)
-        if reaper.ImGui_SmallButton(ctx, "x##x_" .. track_info.name) then
+        local btn_id = "x##x_" .. track_info.index .. "_" .. track_info.name
+        if reaper.ImGui_SmallButton(ctx, btn_id) then
           to_remove = track_info.name
         end
       end
