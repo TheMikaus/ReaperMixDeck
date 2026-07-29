@@ -433,6 +433,36 @@ local function draw_settings()
     end
     set_status("Settings saved.")
   end
+
+  reaper.ImGui_Spacing(ctx)
+  reaper.ImGui_Separator(ctx)
+  reaper.ImGui_Spacing(ctx)
+
+  -- ── Default state management ───────────────────────────────────────────────
+  reaper.ImGui_Text(ctx, "PROJECT DEFAULT STATE")
+  reaper.ImGui_TextDisabled(ctx, "Save the current pan, volume, mute, and solo for all tracks.")
+  reaper.ImGui_TextDisabled(ctx, "Restore anytime to return to this state after running presets.")
+  reaper.ImGui_Spacing(ctx)
+
+  if reaper.ImGui_Button(ctx, "Save Default State##save_default", 150, 0) then
+    local success = fns.save_default_state()
+    if success then
+      set_status("Default state saved for this project.")
+    else
+      set_status("Failed to save default state.")
+    end
+  end
+
+  reaper.ImGui_SameLine(ctx)
+
+  if reaper.ImGui_Button(ctx, "Restore Default State##restore_default", 150, 0) then
+    local success = fns.restore_default_state()
+    if success then
+      set_status("Default state restored.")
+    else
+      set_status("No default state found for this project.")
+    end
+  end
 end
 
 -- ============================================================================

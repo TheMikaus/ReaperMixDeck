@@ -471,7 +471,81 @@ end
 local function save_mute_solo_state()  save_track_state() end
 local function restore_mute_solo_state() restore_track_state() end
 
--- ── Render settings helpers ─────────────────────────────────────────────────
+-- ── Default state management (save/restore entire project state) ─────────────
+
+local function save_default_state()
+  local all_tracks = get_all_tracks()
+  local default_state = {}
+  
+  for _, track_info in ipairs(all_tracks) do
+    local track = track_info.track
+    default_state[track_info.name] = {
+      pan   = reaper.GetMediaTrackInfo_Value(track, "D_PAN"),
+      vol   = reaper.GetMediaTrackInfo_Value(track, "D_VOL"),
+      mute  = reaper.GetMediaTrackInfo_Value(track, "B_MUTE"),
+      solo  = reaper.GetMediaTrackInfo_Value(track, "I_SOLO"),
+    }
+  end
+  
+  -- Save to project config
+  local project_path = get_project_config_path()
+  if not project_path then
+    log("Cannot save default state — no active project", "WARN")
+    return false
+  end
+  
+  local project_data = load_config_file(project_path)
+  project_data.default_state = default_state
+  project_data.version = md.version
+  project_data.timestamp = os.time()
+  
+  local file = io.open(project_path, "w")
+  if not file then
+    log("Failed to write default state: " .. project_path, "ERROR")
+    return false
+  end
+  file:write(json_encode(project_data))
+  file:close()
+  
+  log("Saved default state for project with " .. #all_tracks .. " tracks", "INFO")
+  return true
+end
+
+local function restore_default_state()
+  local project_path = get_project_config_path()
+  if not project_path then
+    log("Cannot restore default state — no active project", "WARN")
+    return false
+  end
+  
+  local project_data = load_config_file(project_path)
+  local default_state = project_data.default_state
+  
+  if not default_state or (next(default_state) == nil) then
+    log("No default state found for this project", "WARN")
+    return false
+  end
+  
+  local all_tracks = get_all_tracks()
+  local restored_count = 0
+  
+  for _, track_info in ipairs(all_tracks) do
+    local track = track_info.track
+    local state = default_state[track_info.name]
+    
+    if state then
+      reaper.SetMediaTrackInfo_Value(track, "D_PAN",  state.pan or 0)
+      reaper.SetMediaTrackInfo_Value(track, "D_VOL",  state.vol or 1)
+      reaper.SetMediaTrackInfo_Value(track, "B_MUTE", state.mute or 0)
+      reaper.SetMediaTrackInfo_Value(track, "I_SOLO", state.solo or 0)
+      restored_count = restored_count + 1
+    end
+  end
+  
+  reaper.UpdateArrange()
+  log("Restored default state — " .. restored_count .. " tracks updated", "INFO")
+  return true
+end
 
 local saved_render = {}
 
@@ -725,6 +799,8 @@ local fns = {
   get_export_path      = get_export_path,
   export_preset        = export_preset,
   batch_export         = batch_export,
+  save_default_state   = save_default_state,
+  restore_default_state = restore_default_state,
 }
 
 local function init()
