@@ -37,9 +37,21 @@ local md = {
 -- UTILITY FUNCTIONS
 -- ============================================================================
 
+-- Internal log buffer: last 200 entries, exposed to UI via md.log_lines
+md.log_lines = {}
+local LOG_MAX = 200
+
 local function log(msg, level)
   level = level or "INFO"
-  reaper.ShowConsoleMsg("[" .. md.name .. " " .. level .. "] " .. msg .. "\n")
+  local entry = "[" .. level .. "] " .. msg
+  table.insert(md.log_lines, entry)
+  if #md.log_lines > LOG_MAX then
+    table.remove(md.log_lines, 1)
+  end
+  -- Only show console for actual errors
+  if level == "ERROR" then
+    reaper.ShowConsoleMsg("[" .. md.name .. " ERROR] " .. msg .. "\n")
+  end
 end
 
 local function get_project_folder()
@@ -814,13 +826,6 @@ end
 -- ============================================================================
 
 init()
-
--- Close the console window (optional cleanup)
--- Try to find and trigger the console close action
-local console_close_cmd = reaper.NamedCommandLookup("_SWSTL_CLSCONSW")
-if console_close_cmd and console_close_cmd ~= 0 then
-  reaper.Main_OnCommand(console_close_cmd, 0)
-end
 
 -- Load and start the ImGui UI
 local ui = dofile(get_script_dir() .. "ui.lua")

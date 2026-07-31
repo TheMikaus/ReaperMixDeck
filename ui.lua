@@ -247,7 +247,7 @@ local function draw_preset_editor()
         -- Create selectable that spans all columns
         local indent = string.rep("      ", track_info.is_folder)
         local sel_id = indent .. track_info.name .. "##sel_" .. track_info.index
-        local flags = reaper.ImGui_SelectableFlags_SpanAllColumns() | reaper.ImGui_SelectableFlags_AllowItemOverlap()
+        local flags = reaper.ImGui_SelectableFlags_SpanAllColumns()
         reaper.ImGui_Selectable(ctx, sel_id, false, flags)
         
         -- Check if row is hovered and set background color
@@ -462,6 +462,21 @@ local function draw_settings()
     else
       set_status("No default state found for this project.")
     end
+  end
+
+  reaper.ImGui_Spacing(ctx)
+  reaper.ImGui_Separator(ctx)
+  reaper.ImGui_Spacing(ctx)
+
+  -- ── Log viewer ────────────────────────────────────────────────────────────
+  reaper.ImGui_Text(ctx, "LOG")
+  reaper.ImGui_Spacing(ctx)
+  if reaper.ImGui_BeginChild(ctx, "##log_panel", -1, 140, true) then
+    local lines = md_ref.log_lines or {}
+    for i = #lines, math.max(1, #lines - 49), -1 do  -- show last 50 lines, newest first
+      reaper.ImGui_TextDisabled(ctx, lines[i])
+    end
+    reaper.ImGui_EndChild(ctx)
   end
 end
 
