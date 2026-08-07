@@ -1,7 +1,7 @@
 -- MixDeck: Export Preset Manager for Reaper
 -- Manage multiple export configurations and batch render with custom track routing
 -- @author ReaperAutomation
--- @version 1.3.26
+-- @version 1.3.28
 
 -- Load JSON utilities
 local function get_script_dir()
@@ -16,13 +16,14 @@ end
 local json = dofile(get_script_dir() .. "json_utils.lua")
 
 local md = {
-  version = "1.3.26",
+  version = "1.3.28",
   name = "MixDeck",
   global_presets = {},      -- Presets shared across all projects
   project_presets = {},     -- Presets specific to the current project
   presets = {},             -- Merged view: global + project (read-only, rebuilt on load/save)
   global_export_path = "", -- Common output folder for all projects
   project_export_path = "",-- Per-project output folder override
+  project_track_remap = {}, -- Per-project route-key remaps for missing tracks
   format = "mp3",           -- Global default format for exports
   bitrate = "320k",         -- Global default bitrate for MP3/OGG
   config_file = "",
@@ -227,10 +228,12 @@ local function load_config()
     local project_data = load_config_file(project_path)
     md.project_presets = project_data.presets or {}
     md.project_export_path = project_data.export_path or ""
+    md.project_track_remap = project_data.track_remap or {}
     log("Loaded " .. #md.project_presets .. " project presets from: " .. project_path, "INFO")
   else
     md.project_presets = {}
     md.project_export_path = ""
+    md.project_track_remap = {}
     log("No active project — skipping project preset load", "WARN")
   end
 
@@ -325,6 +328,8 @@ local function save_config(scope)
   if scope == "global" then
     data.format = md.format
     data.bitrate = md.bitrate
+  else
+    data.track_remap = md.project_track_remap or {}
   end
   file:write(json_encode(data))
   file:close()
@@ -370,6 +375,64 @@ local function get_all_tracks()
     })
   end
   return tracks
+end
+
+local function build_track_key_lookup()
+  local lookup = {}
+  local tracks = get_all_tracks()
+  for _, track_info in ipairs(tracks) do
+    lookup[track_info.route_key] = true
+    lookup[track_info.name] = true
+  end
+  return lookup, tracks
+end
+
+local function get_missing_tracks_for_preset(preset)
+  local missing = {}
+  if not preset or not preset.routing then
+    return missing
+  end
+
+  local lookup = build_track_key_lookup()
+  for source_key, _ in pairs(preset.routing) do
+    if source_key ~= "Master" then
+      local mapped = (md.project_track_remap and md.project_track_remap[source_key]) or source_key
+      if not lookup[mapped] then
+        table.insert(missing, {
+          source_key = source_key,
+          mapped_key = (md.project_track_remap and md.project_track_remap[source_key]) or "",
+        })
+      end
+    end
+  end
+
+  table.sort(missing, function(a, b)
+    return tostring(a.source_key) < tostring(b.source_key)
+  end)
+
+  return missing
+end
+
+local function get_project_track_remap_target(source_key)
+  if not md.project_track_remap then return "" end
+  return md.project_track_remap[source_key] or ""
+end
+
+local function set_project_track_remap(source_key, target_key)
+  if not source_key or source_key == "" then return false end
+  if not get_project_config_path() then
+    log("Cannot save track remap — no active project", "WARN")
+    return false
+  end
+
+  md.project_track_remap = md.project_track_remap or {}
+  if not target_key or target_key == "" then
+    md.project_track_remap[source_key] = nil
+  else
+    md.project_track_remap[source_key] = target_key
+  end
+
+  return save_config("project")
 end
 
 local function print_track_structure()
@@ -801,7 +864,8 @@ local function apply_routing(preset)
   local channel_map = {}
   for track_ref, channel in pairs(preset.routing) do
     if track_ref ~= "Master" and channel then
-      channel_map[track_ref] = channel
+      local mapped_ref = (md.project_track_remap and md.project_track_remap[track_ref]) or track_ref
+      channel_map[mapped_ref] = channel
     end
   end
 
@@ -1043,6 +1107,9 @@ local fns = {
   restore_default_state = restore_default_state,
   get_default_state_status = get_default_state_status,
   get_supported_render_formats = get_supported_render_formats,
+  get_missing_tracks_for_preset = get_missing_tracks_for_preset,
+  get_project_track_remap_target = get_project_track_remap_target,
+  set_project_track_remap = set_project_track_remap,
   run_installer         = run_installer,
   restart_mixdeck_action = restart_mixdeck_action,
   set_install_source_dir = set_install_source_dir,

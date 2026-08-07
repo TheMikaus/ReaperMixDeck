@@ -1,6 +1,6 @@
 -- ui.lua: ReaImGui UI for MixDeck
 -- Requires: ReaImGui extension (install via ReaPack)
--- Version: 1.3.26
+-- Version: 1.3.28
 
 local ui = {}
 
@@ -498,6 +498,70 @@ local function draw_preset_editor()
     preset.routing[to_remove] = nil
   end
 
+  -- ── Missing tracks (project remap) ───────────────────────────────────────
+  local missing_tracks = {}
+  if fns and fns.get_missing_tracks_for_preset then
+    missing_tracks = fns.get_missing_tracks_for_preset(preset) or {}
+  end
+
+  if #missing_tracks > 0 then
+    reaper.ImGui_Spacing(ctx)
+    reaper.ImGui_Separator(ctx)
+    reaper.ImGui_Spacing(ctx)
+    reaper.ImGui_Text(ctx, "MISSING TRACKS (PROJECT REMAP)")
+    reaper.ImGui_TextDisabled(ctx, "Map missing preset routes to tracks in this project.")
+    reaper.ImGui_Spacing(ctx)
+
+    local all_tracks = fns.get_all_tracks()
+    local target_keys = {}
+    local target_items = "(unmapped)\0"
+    for _, t in ipairs(all_tracks) do
+      local route_key = t.route_key or t.name
+      table.insert(target_keys, route_key)
+      target_items = target_items .. route_key .. "\0"
+    end
+
+    for i, missing in ipairs(missing_tracks) do
+      local source_key = missing.source_key
+      local mapped_key = ""
+      if fns.get_project_track_remap_target then
+        mapped_key = fns.get_project_track_remap_target(source_key) or ""
+      end
+
+      reaper.ImGui_Text(ctx, source_key)
+      reaper.ImGui_SameLine(ctx)
+      reaper.ImGui_PushItemWidth(ctx, 260)
+
+      local current_idx = 0
+      if mapped_key ~= "" then
+        for idx, target_key in ipairs(target_keys) do
+          if target_key == mapped_key then
+            current_idx = idx
+            break
+          end
+        end
+      end
+
+      local combo_id = "##remap_" .. tostring(i)
+      local changed, new_idx = reaper.ImGui_Combo(ctx, combo_id, current_idx, target_items)
+      reaper.ImGui_PopItemWidth(ctx)
+
+      if changed and fns.set_project_track_remap then
+        local target_key = (new_idx == 0) and "" or target_keys[new_idx]
+        local ok = fns.set_project_track_remap(source_key, target_key)
+        if ok then
+          if target_key ~= "" then
+            set_status("Remapped: " .. source_key .. " -> " .. target_key)
+          else
+            set_status("Remap cleared: " .. source_key)
+          end
+        else
+          set_status("Failed to save remap for: " .. source_key)
+        end
+      end
+    end
+  end
+
   -- ── Add Track row ────────────────────────────────────────────────────────
   reaper.ImGui_Spacing(ctx)
   local all_tracks   = fns.get_all_tracks()
@@ -745,7 +809,7 @@ local function draw_settings()
 
   if reaper.ImGui_Button(ctx, "Save Settings##saveset") then
     fns.save_config("global")
-    if md_ref.project_export_path and md_ref.project_export_path ~= "" then
+    if fns.get_project_name and fns.get_project_name() then
       fns.save_config("project")
     end
     set_status("Settings saved.")
