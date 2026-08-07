@@ -1,7 +1,7 @@
 -- MixDeck: Export Preset Manager for Reaper
 -- Manage multiple export configurations and batch render with custom track routing
 -- @author ReaperAutomation
--- @version 1.0.0
+-- @version 1.3.19
 
 -- Load JSON utilities
 local function get_script_dir()
@@ -16,7 +16,7 @@ end
 local json = dofile(get_script_dir() .. "json_utils.lua")
 
 local md = {
-  version = "1.3.1",
+  version = "1.3.19",
   name = "MixDeck",
   global_presets = {},      -- Presets shared across all projects
   project_presets = {},     -- Presets specific to the current project
@@ -31,6 +31,10 @@ local md = {
   selected_preset = nil,
   muted_state = {},  -- Track original mute states during export
   soloed_state = {}, -- Track original solo states during export
+  log_lines = {},
+  log_path = get_script_dir() .. "mixdeck.log",
+  error_log_path = get_script_dir() .. "mixdeck_errors.log",
+  install_source_dir = "",
 }
 
 -- ============================================================================
@@ -38,19 +42,34 @@ local md = {
 -- ============================================================================
 
 -- Internal log buffer: last 200 entries, exposed to UI via md.log_lines
-md.log_lines = {}
 local LOG_MAX = 200
+
+local function append_to_file(path, line)
+  local dir = path:match("(.+)[/\\][^/\\]+$")
+  if dir and dir ~= "" then
+    pcall(function()
+      reaper.RecursiveCreateDirectory(dir, 0)
+    end)
+  end
+
+  local file = io.open(path, "a")
+  if not file then return false end
+  file:write(line .. "\n")
+  file:close()
+  return true
+end
 
 local function log(msg, level)
   level = level or "INFO"
-  local entry = "[" .. level .. "] " .. msg
+  local stamp = os.date("%Y-%m-%d %H:%M:%S")
+  local entry = "[" .. stamp .. "] [" .. level .. "] " .. msg
   table.insert(md.log_lines, entry)
   if #md.log_lines > LOG_MAX then
     table.remove(md.log_lines, 1)
   end
-  -- Only show console for actual errors
+  append_to_file(md.log_path, entry)
   if level == "ERROR" then
-    reaper.ShowConsoleMsg("[" .. md.name .. " ERROR] " .. msg .. "\n")
+    append_to_file(md.error_log_path, entry)
   end
 end
 
@@ -81,6 +100,44 @@ local function get_global_config_path()
   -- Ensure directory exists (Reaper 6.29+: reaper.RecursiveCreateDirectory)
   reaper.RecursiveCreateDirectory(dir, 0)
   return dir .. "/mixdeck_global.json"
+end
+
+local function get_runtime_log_dir()
+  local dir = get_global_config_path():match("(.+)[/\\][^/\\]+$") or get_script_dir()
+  return dir
+end
+
+local function get_install_source_state_path()
+  local global_path = get_global_config_path()
+  local dir = global_path:match("(.+)[/\\][^/\\]+$") or get_script_dir()
+  return dir .. "/mixdeck_install_source.txt"
+end
+
+local function load_install_source_dir()
+  local path = get_install_source_state_path()
+  local file = io.open(path, "r")
+  if not file then return "" end
+  local dir = file:read("*l") or ""
+  file:close()
+  if dir ~= "" then
+    md.install_source_dir = dir
+  end
+  return md.install_source_dir or ""
+end
+
+local function save_install_source_dir(dir)
+  if not dir or dir == "" then return false end
+  dir = dir:gsub("\\", "/")
+  if dir:sub(-1) ~= "/" then
+    dir = dir .. "/"
+  end
+  local path = get_install_source_state_path()
+  local file = io.open(path, "w")
+  if not file then return false end
+  file:write(dir)
+  file:close()
+  md.install_source_dir = dir
+  return true
 end
 
 -- Per-project config lives next to the .rpp file
@@ -282,6 +339,11 @@ end
 local function get_all_tracks()
   local tracks = {}
   local track_count = reaper.CountTracks(0)
+
+  local function make_track_route_key(track_index, track_name)
+    return string.format("%03d: %s", track_index + 1, track_name)
+  end
+
   for i = 0, track_count - 1 do
     local track = reaper.GetTrack(0, i)
     local retval, track_name = reaper.GetTrackName(track)
@@ -290,6 +352,7 @@ local function get_all_tracks()
       index = i,
       track = track,
       name = track_name,
+      route_key = make_track_route_key(i, track_name),
       is_folder = is_folder,
     })
   end
@@ -330,7 +393,7 @@ local function create_preset(name, scope)
   local routing = {}
   local all_tracks = get_all_tracks()
   for _, track_info in ipairs(all_tracks) do
-    routing[track_info.name] = "C"  -- C = Center (default)
+    routing[track_info.route_key or track_info.name] = "C"  -- C = Center (default)
   end
 
   local preset = {
@@ -441,6 +504,38 @@ local function get_render_format_string(fmt, bitrate)
     return RENDER_FORMATS.wav_24  -- default WAV to 24-bit
   end
   return RENDER_FORMATS.wav_24    -- safe fallback
+end
+
+local function get_fourcc(fmt_blob)
+  if not fmt_blob or #fmt_blob < 4 then return "" end
+  return fmt_blob:sub(1, 4)
+end
+
+local supported_render_formats_cache = nil
+
+local function is_render_format_supported(fmt, bitrate)
+  local desired = get_render_format_string(fmt, bitrate)
+  local _, previous = reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", "", false)
+
+  reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", desired, true)
+  local _, applied = reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", "", false)
+
+  reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", previous or "", true)
+  return get_fourcc(applied) == get_fourcc(desired)
+end
+
+local function get_supported_render_formats(refresh)
+  if not refresh and supported_render_formats_cache then
+    return supported_render_formats_cache
+  end
+
+  local supported = {}
+  if is_render_format_supported("wav", md.bitrate) then table.insert(supported, "wav") end
+  if is_render_format_supported("flac", md.bitrate) then table.insert(supported, "flac") end
+  if is_render_format_supported("mp3", md.bitrate) then table.insert(supported, "mp3") end
+
+  supported_render_formats_cache = supported
+  return supported_render_formats_cache
 end
 
 -- ── Track state helpers ─────────────────────────────────────────────────────
@@ -559,6 +654,25 @@ local function restore_default_state()
   return true
 end
 
+local function get_default_state_status()
+  local project_path = get_project_config_path()
+  if not project_path then
+    return false, 0
+  end
+
+  local project_data = load_config_file(project_path)
+  local default_state = project_data.default_state
+  if not default_state or next(default_state) == nil then
+    return false, 0
+  end
+
+  local count = 0
+  for _ in pairs(default_state) do
+    count = count + 1
+  end
+  return true, count
+end
+
 local saved_render = {}
 
 local function save_render_settings()
@@ -595,8 +709,13 @@ local function configure_render(preset, out_path)
   reaper.GetSetProjectInfo_String(0, "RENDER_FILE",    out_path, true)
   reaper.GetSetProjectInfo_String(0, "RENDER_PATTERN", "",       true)  -- no additional pattern
 
-  -- Format (use global settings, not per-preset)
-  local fmt_str = get_render_format_string(md.format, md.bitrate)
+  -- Format (use global settings, not per-preset). Fall back when unavailable.
+  local format_to_use = md.format
+  if not is_render_format_supported(format_to_use, md.bitrate) then
+    log("Render format unavailable: " .. tostring(format_to_use) .. ". Falling back to WAV.", "WARN")
+    format_to_use = "wav"
+  end
+  local fmt_str = get_render_format_string(format_to_use, md.bitrate)
   reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", fmt_str, true)
 
   -- Render entire project, stereo, master mix only
@@ -657,24 +776,16 @@ end
 local function apply_routing(preset)
   log("Applying routing for preset: " .. preset.name, "INFO")
 
-  -- Build a flat map of track_name → channel for all tracks (including folder children)
+  local function make_track_route_key(track_index, track_name)
+    return string.format("%03d: %s", track_index + 1, track_name)
+  end
+
+  -- Build a flat map of indexed_track_key -> channel for explicit routes.
+  -- Legacy presets may still use plain track names, so those are still accepted.
   local channel_map = {}
   for track_ref, channel in pairs(preset.routing) do
-    if track_ref ~= "Master" then
-      local track = find_track_by_name(track_ref)
-      if track then
-        channel_map[track_ref] = channel
-        -- Apply same channel to all children of folder tracks
-        for _, child in ipairs(get_children_tracks(track)) do
-          local retval, child_name = reaper.GetTrackName(child)
-          -- Don't override if child already has explicit routing
-          if not preset.routing[child_name] then
-            channel_map[child_name] = channel
-          end
-        end
-      else
-        log("Track not found: " .. track_ref, "WARN")
-      end
+    if track_ref ~= "Master" and channel then
+      channel_map[track_ref] = channel
     end
   end
 
@@ -699,8 +810,9 @@ local function apply_routing(preset)
   for i = 0, track_count - 1 do
     local track = reaper.GetTrack(0, i)
     local retval, track_name = reaper.GetTrackName(track)
+    local track_key = make_track_route_key(i, track_name)
 
-    local ch = channel_map[track_name] or implicit_ch
+    local ch = channel_map[track_key] or channel_map[track_name] or implicit_ch
 
     if ch == "L" then
       reaper.SetMediaTrackInfo_Value(track, "D_PAN",  -1.0)
@@ -799,6 +911,101 @@ end
 -- INITIALIZATION & MAIN LOOP
 -- ============================================================================
 
+local function normalize_install_dir(dir)
+  if not dir or dir == "" then return "" end
+  local normalized = dir:gsub("\\", "/")
+  if normalized:sub(-1) ~= "/" then
+    normalized = normalized .. "/"
+  end
+  return normalized
+end
+
+local function set_install_source_dir(dir)
+  if not dir or dir == "" then return false end
+  local normalized = normalize_install_dir(dir)
+  return save_install_source_dir(normalized)
+end
+
+local function resolve_installer_path(preferred_dir, saved_dir)
+  local candidates = {}
+  local current_dir = normalize_install_dir(get_script_dir())
+  if saved_dir and saved_dir ~= "" then
+    local normalized = normalize_install_dir(saved_dir)
+    if normalized ~= "" then
+      table.insert(candidates, normalized)
+    end
+  end
+
+  if preferred_dir and preferred_dir ~= "" then
+    local normalized = normalize_install_dir(preferred_dir)
+    if normalized ~= "" then
+      table.insert(candidates, normalized)
+    end
+  end
+
+  if current_dir ~= "" then
+    table.insert(candidates, current_dir)
+  end
+
+  local seen = {}
+  for _, dir in ipairs(candidates) do
+    if not seen[dir] then
+      seen[dir] = true
+      local path = dir .. "install.lua"
+      local file = io.open(path, "r")
+      if file then
+        file:close()
+        return dir, path
+      end
+    end
+  end
+
+  local fallback_dir = normalize_install_dir(preferred_dir or saved_dir or current_dir)
+  return fallback_dir, fallback_dir .. "install.lua"
+end
+
+local function run_installer()
+  local installer_dir, installer_path = resolve_installer_path(get_script_dir(), md.install_source_dir)
+  local current_dir = get_script_dir()
+  local global_config_path = get_global_config_path()
+  local state_path = get_install_source_state_path()
+
+  log("Update requested", "INFO")
+  log("Current script dir: " .. current_dir, "INFO")
+  log("Resolved installer dir: " .. installer_dir, "INFO")
+  log("Installer path candidate: " .. installer_path, "INFO")
+  log("Install state path: " .. state_path, "INFO")
+  log("Global config path: " .. global_config_path, "INFO")
+
+  local exists = io.open(installer_path, "r")
+  if not exists then
+    log("Installer not found at: " .. installer_path, "ERROR")
+    return false
+  end
+  exists:close()
+
+  local saved = save_install_source_dir(installer_dir)
+  log("Saved install source dir: " .. tostring(saved), "INFO")
+
+  local ok, err = pcall(function()
+    dofile(installer_path)
+  end)
+  if not ok then
+    log("Installer launch failed: " .. tostring(err), "ERROR")
+    return false
+  end
+
+  log("Installer launched successfully", "INFO")
+  return true
+end
+
+local restart_requested = false
+
+local function restart_mixdeck_action()
+  restart_requested = true
+  return true
+end
+
 -- Functions table exposed to the UI module
 local fns = {
   create_preset        = create_preset,
@@ -813,11 +1020,25 @@ local fns = {
   batch_export         = batch_export,
   save_default_state   = save_default_state,
   restore_default_state = restore_default_state,
+  get_default_state_status = get_default_state_status,
+  get_supported_render_formats = get_supported_render_formats,
+  run_installer         = run_installer,
+  restart_mixdeck_action = restart_mixdeck_action,
+  set_install_source_dir = set_install_source_dir,
+  get_install_source_dir = load_install_source_dir,
+  log_message          = log,
 }
 
 local function init()
+  md.log_path = get_runtime_log_dir() .. "/mixdeck.log"
+  md.error_log_path = get_runtime_log_dir() .. "/mixdeck_errors.log"
   log("Initializing " .. md.name .. " v" .. md.version, "INFO")
   log("Global config: " .. get_global_config_path(), "INFO")
+  load_install_source_dir()
+  if md.install_source_dir == "" then
+    md.install_source_dir = get_script_dir()
+    save_install_source_dir(md.install_source_dir)
+  end
   load_config()
 end
 
@@ -827,12 +1048,89 @@ end
 
 init()
 
+local ui = nil
+local source_cache = {}
+
+local function read_source(path)
+  local file = io.open(path, "r")
+  if not file then return nil end
+  local contents = file:read("*a")
+  file:close()
+  return contents
+end
+
+local function reload_sources_if_needed()
+  local ui_path = get_script_dir() .. "ui.lua"
+  local main_path = get_script_dir() .. "mixdeck.lua"
+
+  local function check_file(path)
+    local contents = read_source(path)
+    if not contents then return false end
+    local prev = source_cache[path]
+    source_cache[path] = contents
+    return prev ~= nil and prev ~= contents
+  end
+
+  local ui_changed = check_file(ui_path)
+  local main_changed = check_file(main_path)
+
+  if ui_changed then
+    local ok, err = pcall(function()
+      if ui and ui.destroy then
+        ui.destroy()
+      end
+      ui = dofile(ui_path)
+      ui.init(md, fns)
+    end)
+    if ok then
+      log("Reloaded UI from disk", "INFO")
+    else
+      log("UI reload failed: " .. tostring(err), "ERROR")
+    end
+  end
+
+  if main_changed then
+    local ok, err = pcall(function()
+      load_config()
+    end)
+    if ok then
+      log("mixdeck.lua changed; config reloaded", "INFO")
+    else
+      log("Config reload failed after source change: " .. tostring(err), "ERROR")
+    end
+  end
+end
+
 -- Load and start the ImGui UI
-local ui = dofile(get_script_dir() .. "ui.lua")
+ui = dofile(get_script_dir() .. "ui.lua")
 ui.init(md, fns)
 
 local function main_loop()
-  local open = ui.draw()
+  reload_sources_if_needed()
+
+  local ok, open = pcall(function()
+    return ui.draw()
+  end)
+
+  if not ok then
+    log("UI draw failed: " .. tostring(open), "ERROR")
+    open = true
+  end
+
+  if restart_requested then
+    restart_requested = false
+    ui.destroy()
+
+    local _, _, section_id, command_id = reaper.get_action_context()
+    if command_id and command_id ~= 0 then
+      log("Restarting MixDeck action after update", "INFO")
+      reaper.Main_OnCommand(command_id, 0)
+    else
+      log("Could not restart MixDeck action automatically (missing command ID)", "WARN")
+    end
+    return
+  end
+
   if open then
     reaper.defer(main_loop)
   else

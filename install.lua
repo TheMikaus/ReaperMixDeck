@@ -2,7 +2,7 @@
 -- Run this script once in Reaper (Actions > Load ReaScript, run it)
 -- It will check dependencies and install MixDeck to your Scripts folder.
 
-local MIXDECK_VERSION = "1.0.0"
+local MIXDECK_VERSION = "1.3.19"
 local REAIMGUI_MIN    = "0.8"
 
 -- ============================================================================
@@ -152,7 +152,9 @@ end
 local FILES = {
   "mixdeck.lua",
   "ui.lua",
+  "install.lua",
   "json_utils.lua",
+  "routing_utils.lua",
 }
 
 local function install_files()
@@ -180,11 +182,25 @@ local function install_files()
   local cfg_dir = dst_dir .. "/config"
   reaper.RecursiveCreateDirectory(cfg_dir, 0)
   local cfg_dst = cfg_dir .. "/default_config.json"
-  if not io.open(cfg_dst, "r") then
+  local cfg_existing = io.open(cfg_dst, "r")
+  if cfg_existing then
+    cfg_existing:close()
+    msg("  ⏭️   config/default_config.json  (skipped — user config exists)")
+  else
     copy_file(src_dir .. "config/default_config.json", cfg_dst)
     msg("  ✅  config/default_config.json  (default template)")
+  end
+
+  -- Persist install source directory so Update can re-run install.lua from origin.
+  local source_state_path = dst_dir .. "/mixdeck_install_source.txt"
+  local source_state = io.open(source_state_path, "w")
+  if source_state then
+    source_state:write(src_dir)
+    source_state:close()
+    msg("  ✅  mixdeck_install_source.txt  (installer source saved)")
   else
-    msg("  ⏭️   config/default_config.json  (skipped — user config exists)")
+    msg("  ⚠️   mixdeck_install_source.txt  (failed to save installer source)")
+    all_ok = false
   end
 
   return all_ok, dst_dir
