@@ -1,6 +1,6 @@
 -- ui.lua: ReaImGui UI for MixDeck
 -- Requires: ReaImGui extension (install via ReaPack)
--- Version: 1.3.21
+-- Version: 1.3.24
 
 local ui = {}
 
@@ -505,15 +505,20 @@ local function draw_preset_editor()
 
   reaper.ImGui_Separator(ctx)
 
-  -- ── Save button (edit action) ────────────────────────────────────────────
-  if reaper.ImGui_Button(ctx, "Save Preset##sv", 100, 0) then
-    fns.save_preset_to_scope(preset, preset.scope or "global")
-    set_status("Saved: " .. preset.name)
-  end
 end
 
 local function draw_center_action_bar(center_width)
   local preset = get_selected_preset()
+
+  if reaper.ImGui_Button(ctx, "Save Preset##sv_top", 110, 0) then
+    if preset then
+      fns.save_preset_to_scope(preset, preset.scope or "global")
+      set_status("Saved: " .. preset.name)
+    else
+      set_status("Select a preset first.")
+    end
+  end
+  reaper.ImGui_SameLine(ctx)
 
   if reaper.ImGui_Button(ctx, "▶ Preview##prev_top", 90, 0) then
     if preset then

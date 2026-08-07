@@ -1,7 +1,7 @@
 -- MixDeck: Export Preset Manager for Reaper
 -- Manage multiple export configurations and batch render with custom track routing
 -- @author ReaperAutomation
--- @version 1.3.21
+-- @version 1.3.24
 
 -- Load JSON utilities
 local function get_script_dir()
@@ -16,7 +16,7 @@ end
 local json = dofile(get_script_dir() .. "json_utils.lua")
 
 local md = {
-  version = "1.3.21",
+  version = "1.3.24",
   name = "MixDeck",
   global_presets = {},      -- Presets shared across all projects
   project_presets = {},     -- Presets specific to the current project
@@ -845,14 +845,19 @@ local function export_preset(preset)
 
   log("Exporting preset: " .. preset.name, "INFO")
 
-  -- Build output path (no extension — Reaper appends from format)
+  -- Build output path as:
+  -- {export_folder}/{preset_name}/{project-name}-{preset_name}.{ext}
   local out_folder = get_export_path() or get_project_folder() or ""
   if out_folder ~= "" and not out_folder:match("[\\/]$") then
     out_folder = out_folder .. "/"
   end
-  -- Sanitise preset name for use in a filename
-  local safe_name = preset.name:gsub('[\\/:*?"<>|]', "_")
-  local out_stem  = out_folder .. project_name .. "_" .. safe_name
+
+  local safe_project = project_name:gsub('[\\/:*?"<>|]', "_")
+  local safe_preset = preset.name:gsub('[\\/:*?"<>|]', "_")
+  local preset_dir = out_folder .. safe_preset
+  reaper.RecursiveCreateDirectory(preset_dir, 0)
+
+  local out_stem  = preset_dir .. "/" .. safe_project .. "-" .. safe_preset
 
   -- Persist state
   save_render_settings()

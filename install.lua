@@ -2,7 +2,7 @@
 -- Run this script once in Reaper (Actions > Load ReaScript, run it)
 -- It will check dependencies and install MixDeck to your Scripts folder.
 
-local MIXDECK_VERSION = "1.3.21"
+local MIXDECK_VERSION = "1.3.24"
 local REAIMGUI_MIN    = "0.8"
 
 -- ============================================================================
@@ -31,6 +31,12 @@ end
 
 local function reappack_installed()
   return reaper.APIExists("ReaPack_GetOwner")
+end
+
+local function has_folder_browser_support()
+  local has_js = reaper.APIExists("JS_Dialog_BrowseForFolder")
+  local has_sws = reaper.APIExists("CF_DialogBrowseForFolder")
+  return has_js or has_sws, has_js, has_sws
 end
 
 local function get_script_dir()
@@ -135,11 +141,34 @@ local function check_deps()
 
   if not reaimgui_version_ok() then
     msg("⚠️   ReaImGui found but version may be outdated (need >= " .. REAIMGUI_MIN .. ")")
-    msg("    Consider updating via ReaPack > Synchronize packages")
-    msg("    Continuing install anyway...")
+    msg("    Please update via ReaPack > Synchronize packages")
+    msg("    Restart Reaper, then run this installer again")
     msg("")
+    return false
   else
     msg("✅  ReaImGui found (v" .. reaper.ImGui_GetVersion() .. ")")
+  end
+
+  msg("")
+  local has_folder_support, has_js, has_sws = has_folder_browser_support()
+  if has_folder_support then
+    if has_js then
+      msg("✅  Folder browse support: JS_ReaScriptAPI")
+    else
+      msg("✅  Folder browse support: SWS")
+    end
+  else
+    msg("⚠️   Folder browse support not found.")
+    msg("    MixDeck folder Browse buttons require one of:")
+    msg("    1. JS_ReaScriptAPI extension (recommended)")
+    msg("    2. SWS extension")
+    msg("")
+    msg("    How to install via ReaPack:")
+    msg("    1. Open ReaPack browser")
+    msg("    2. Search: JS_ReaScriptAPI  (or SWS)")
+    msg("    3. Install, restart Reaper, then run installer again")
+    msg("")
+    return false
   end
 
   return true
