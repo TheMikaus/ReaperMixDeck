@@ -42,6 +42,17 @@ With MixDeck:
 3. (Done — all files rendered with correct routing)
 ```
 
+## Typical Use Case: Band Member Exports
+
+For band workflows, create one preset per member and route that member's track(s) to one side while routing everything else to the other side.
+
+Example:
+- `Vocals` preset: vocals tracks to **Left**, everything else to **Right**
+- `Guitar` preset: guitar tracks to **Left**, everything else to **Right**
+- `Bass` preset: bass tracks to **Left**, everything else to **Right**
+
+Because presets are reusable, you can use the same MixDeck setup across every recording project that has similarly named tracks, then run **Export All** to generate all member takes in one pass.
+
 ## Requirements
 
 - **Reaper** 6.0+
@@ -149,7 +160,7 @@ Output files: `{ProjectName}_{PresetName}.mp3` (or `.wav`, `.flac`)
 → Make sure you restarted Reaper after installing ReaPack (it registers itself on startup)
 
 **Tracks not routing correctly**
-→ Track names in presets must match project track names exactly (case-sensitive)
+→ Track names are matched case-insensitively, and missing tracks can be remapped per project in the preset editor
 
 **Config file missing after export**
 → Check console (View → Show console) for `[MixDeck]` error messages
