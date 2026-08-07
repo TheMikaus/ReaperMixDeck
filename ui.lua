@@ -1,6 +1,6 @@
 -- ui.lua: ReaImGui UI for MixDeck
 -- Requires: ReaImGui extension (install via ReaPack)
--- Version: 1.3.19
+-- Version: 1.3.21
 
 local ui = {}
 
@@ -24,7 +24,7 @@ local preview_active       = false  -- preview is playing
 local drag_src_idx         = nil    -- dragging preset from index
 
 local W_LEFT   = 295
-local W_CENTER = 400  -- center column for editor
+local W_CENTER = 500  -- center column for editor
 local WIN_W    = 1300
 local WIN_H    = 700
 
@@ -172,17 +172,30 @@ end
 
 local function browse_for_folder(title, initial_dir)
   if reaper.APIExists and reaper.APIExists("JS_Dialog_BrowseForFolder") then
-    local a, b = reaper.JS_Dialog_BrowseForFolder(title or "Select Folder", initial_dir or "")
-    if type(a) == "string" and a ~= "" then
-      return a
-    end
-    if (a == 1 or a == true) and type(b) == "string" and b ~= "" then
-      return b
+    local ok, a, b = pcall(reaper.JS_Dialog_BrowseForFolder, title or "Select Folder", initial_dir or "")
+    if ok then
+      if type(a) == "string" and a ~= "" then
+        return a
+      end
+      if (a == 1 or a == true) and type(b) == "string" and b ~= "" then
+        return b
+      end
+    elseif fns and fns.log_message then
+      fns.log_message("UI: JS_Dialog_BrowseForFolder failed — " .. tostring(a), "ERROR")
     end
   elseif reaper.APIExists and reaper.APIExists("CF_DialogBrowseForFolder") then
-    local path = reaper.CF_DialogBrowseForFolder(title or "Select Folder", initial_dir or "")
-    if path and path ~= "" then
+    local ok_two_args, path = pcall(reaper.CF_DialogBrowseForFolder, title or "Select Folder", initial_dir or "")
+    if ok_two_args and path and path ~= "" then
       return path
+    end
+
+    local ok_one_arg, path_one_arg = pcall(reaper.CF_DialogBrowseForFolder, initial_dir or "")
+    if ok_one_arg and path_one_arg and path_one_arg ~= "" then
+      return path_one_arg
+    end
+
+    if (not ok_two_args or not ok_one_arg) and fns and fns.log_message then
+      fns.log_message("UI: CF_DialogBrowseForFolder failed", "ERROR")
     end
   end
 
@@ -492,28 +505,28 @@ local function draw_preset_editor()
 
   reaper.ImGui_Separator(ctx)
 
-  -- ── Output preview ───────────────────────────────────────────────────────
-  local proj_name   = fns.get_project_name() or "Untitled"
-  local out_folder  = fns.get_export_path() or "(project folder)"
-  reaper.ImGui_Text(ctx, "Output folder: " .. out_folder)
-  reaper.ImGui_TextDisabled(ctx, "  → " .. proj_name .. "_" .. preset.name .. "." .. preset.format)
-
-  reaper.ImGui_Spacing(ctx)
-
-  -- ── Action buttons ───────────────────────────────────────────────────────
-  if reaper.ImGui_Button(ctx, "▶ Preview##prev", 60, 0) then
-    start_preview()
-  end
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_TextDisabled(ctx, "(placeholder)")
-  reaper.ImGui_SameLine(ctx, 0, 20)
+  -- ── Save button (edit action) ────────────────────────────────────────────
   if reaper.ImGui_Button(ctx, "Save Preset##sv", 100, 0) then
     fns.save_preset_to_scope(preset, preset.scope or "global")
     set_status("Saved: " .. preset.name)
   end
+end
+
+local function draw_center_action_bar(center_width)
+  local preset = get_selected_preset()
+
+  if reaper.ImGui_Button(ctx, "▶ Preview##prev_top", 90, 0) then
+    if preset then
+      start_preview()
+    else
+      set_status("Select a preset first.")
+    end
+  end
   reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "Export This##ex1", 100, 0) then
-    if not fns.get_project_name() then
+  if reaper.ImGui_Button(ctx, "Export This##ex1_top", 110, 0) then
+    if not preset then
+      set_status("Select a preset first.")
+    elseif not fns.get_project_name() then
       set_status("Error: save your project before exporting.")
     else
       local ok = fns.export_preset(preset)
@@ -522,7 +535,7 @@ local function draw_preset_editor()
     end
   end
   reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "Export All##exall", 100, 0) then
+  if reaper.ImGui_Button(ctx, "Export All##exall_top", 110, 0) then
     if not fns.get_project_name() then
       set_status("Error: save your project before exporting.")
     else
@@ -883,9 +896,15 @@ function ui.draw()
       reaper.ImGui_SetCursorPosY(ctx, panel_start_y)
       reaper.ImGui_SetCursorPosX(ctx, panel_start_x + W_LEFT + 4)
       local center_width = W_CENTER
-    safe_draw_child("##center_panel", center_width, avail_height, child_border_flag(), function()
-      draw_preset_editor()
-    end)
+
+      draw_center_action_bar(center_width)
+
+      local center_body_y = panel_start_y + 28
+      reaper.ImGui_SetCursorPosY(ctx, center_body_y)
+      reaper.ImGui_SetCursorPosX(ctx, panel_start_x + W_LEFT + 4)
+      safe_draw_child("##center_panel", center_width, avail_height - 28, child_border_flag(), function()
+        draw_preset_editor()
+      end)
 
     -- ── Right panel: Settings ──────────────────────────────────────────────
     reaper.ImGui_SetCursorPosY(ctx, panel_start_y)
