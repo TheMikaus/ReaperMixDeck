@@ -1,7 +1,7 @@
 -- MixDeck: Export Preset Manager for Reaper
 -- Manage multiple export configurations and batch render with custom track routing
 -- @author ReaperAutomation
--- @version 1.3.28
+-- @version 1.3.32
 
 -- Load JSON utilities
 local function get_script_dir()
@@ -16,7 +16,7 @@ end
 local json = dofile(get_script_dir() .. "json_utils.lua")
 
 local md = {
-  version = "1.3.28",
+  version = "1.3.32",
   name = "MixDeck",
   global_presets = {},      -- Presets shared across all projects
   project_presets = {},     -- Presets specific to the current project
@@ -24,6 +24,7 @@ local md = {
   global_export_path = "", -- Common output folder for all projects
   project_export_path = "",-- Per-project output folder override
   project_track_remap = {}, -- Per-project route-key remaps for missing tracks
+  global_track_automap = {},-- Global missing-only name-to-name automap
   format = "mp3",           -- Global default format for exports
   bitrate = "320k",         -- Global default bitrate for MP3/OGG
   config_file = "",
@@ -218,6 +219,7 @@ local function load_config()
   local global_data = load_config_file(global_path)
   md.global_presets = global_data.presets or {}
   md.global_export_path = global_data.export_path or ""
+  md.global_track_automap = global_data.track_automap or {}
   md.format = global_data.format or "mp3"
   md.bitrate = global_data.bitrate or "320k"
   log("Loaded " .. #md.global_presets .. " global presets from: " .. global_path, "INFO")
@@ -328,6 +330,7 @@ local function save_config(scope)
   if scope == "global" then
     data.format = md.format
     data.bitrate = md.bitrate
+    data.track_automap = md.global_track_automap or {}
   else
     data.track_remap = md.project_track_remap or {}
   end
@@ -379,12 +382,29 @@ end
 
 local function build_track_key_lookup()
   local lookup = {}
+  local lookup_lc = {}
   local tracks = get_all_tracks()
   for _, track_info in ipairs(tracks) do
     lookup[track_info.route_key] = true
     lookup[track_info.name] = true
+    lookup_lc[string.lower(track_info.route_key)] = track_info.route_key
+    lookup_lc[string.lower(track_info.name)] = track_info.name
   end
-  return lookup, tracks
+  return lookup, lookup_lc, tracks
+end
+
+local function extract_track_name_from_key(route_key)
+  if not route_key then return "" end
+  local txt = tostring(route_key)
+  local rhs = txt:match("^.*%s>%s(.+)$")
+  if rhs and rhs ~= "" then
+    return rhs
+  end
+  local legacy = txt:match("^%d+:%s*(.+)$")
+  if legacy and legacy ~= "" then
+    return legacy
+  end
+  return txt
 end
 
 local function get_missing_tracks_for_preset(preset)
@@ -393,11 +413,24 @@ local function get_missing_tracks_for_preset(preset)
     return missing
   end
 
-  local lookup = build_track_key_lookup()
+  local lookup, lookup_lc = build_track_key_lookup()
   for source_key, _ in pairs(preset.routing) do
     if source_key ~= "Master" then
       local mapped = (md.project_track_remap and md.project_track_remap[source_key]) or source_key
-      if not lookup[mapped] then
+      local mapped_lc = string.lower(tostring(mapped))
+      local resolved_ok = lookup[mapped] or lookup_lc[mapped_lc]
+
+      if not resolved_ok then
+        local source_name = extract_track_name_from_key(source_key)
+        local source_name_lc = string.lower(source_name)
+        local auto_target_name = (md.global_track_automap and md.global_track_automap[source_name_lc]) or ""
+        if auto_target_name ~= "" then
+          local auto_target_lc = string.lower(auto_target_name)
+          resolved_ok = lookup[auto_target_name] or lookup_lc[auto_target_lc]
+        end
+      end
+
+      if not resolved_ok then
         table.insert(missing, {
           source_key = source_key,
           mapped_key = (md.project_track_remap and md.project_track_remap[source_key]) or "",
@@ -411,6 +444,63 @@ local function get_missing_tracks_for_preset(preset)
   end)
 
   return missing
+end
+
+local function remove_track_from_preset(preset_name, route_key)
+  local preset = get_preset(preset_name)
+  if not preset or not preset.routing then
+    log("Cannot remove track from preset — preset not found: " .. tostring(preset_name), "WARN")
+    return false
+  end
+
+  local removed = false
+  if preset.routing[route_key] ~= nil then
+    preset.routing[route_key] = nil
+    removed = true
+  else
+    local route_key_lc = string.lower(tostring(route_key or ""))
+    for existing_key, _ in pairs(preset.routing) do
+      if string.lower(tostring(existing_key)) == route_key_lc then
+        preset.routing[existing_key] = nil
+        removed = true
+        break
+      end
+    end
+  end
+
+  if not removed then
+    log("Track route key not found in preset: " .. tostring(route_key), "WARN")
+    return false
+  end
+
+  local scope = preset.scope or "global"
+  local ok = save_preset_to_scope(preset, scope)
+  if ok then
+    log("Removed route from preset: " .. tostring(route_key), "INFO")
+  end
+  return ok
+end
+
+local function set_permanent_track_automap(source_key, target_key)
+  local source_name = extract_track_name_from_key(source_key)
+  local source_name_lc = string.lower(source_name or "")
+  if source_name_lc == "" then
+    return false
+  end
+
+  md.global_track_automap = md.global_track_automap or {}
+
+  if not target_key or target_key == "" then
+    md.global_track_automap[source_name_lc] = nil
+  else
+    local target_name = extract_track_name_from_key(target_key)
+    if not target_name or target_name == "" then
+      return false
+    end
+    md.global_track_automap[source_name_lc] = target_name
+  end
+
+  return save_config("global")
 end
 
 local function get_project_track_remap_target(source_key)
@@ -862,10 +952,28 @@ local function apply_routing(preset)
   -- Build a flat map of indexed_track_key -> channel for explicit routes.
   -- Legacy presets may still use plain track names, so those are still accepted.
   local channel_map = {}
+  local channel_map_lc = {}
+
+  local track_lookup, track_lookup_lc = build_track_key_lookup()
+
   for track_ref, channel in pairs(preset.routing) do
     if track_ref ~= "Master" and channel then
       local mapped_ref = (md.project_track_remap and md.project_track_remap[track_ref]) or track_ref
-      channel_map[mapped_ref] = channel
+      local canonical = track_lookup_lc[string.lower(tostring(mapped_ref))] or mapped_ref
+
+      if not track_lookup[canonical] and not track_lookup_lc[string.lower(tostring(canonical))] then
+        local source_name = extract_track_name_from_key(track_ref)
+        local auto_target_name = (md.global_track_automap and md.global_track_automap[string.lower(source_name)]) or ""
+        if auto_target_name ~= "" then
+          local auto_canonical = track_lookup_lc[string.lower(auto_target_name)] or auto_target_name
+          if track_lookup[auto_canonical] or track_lookup_lc[string.lower(tostring(auto_canonical))] then
+            canonical = auto_canonical
+          end
+        end
+      end
+
+      channel_map[canonical] = channel
+      channel_map_lc[string.lower(tostring(canonical))] = channel
     end
   end
 
@@ -892,7 +1000,11 @@ local function apply_routing(preset)
     local track_name = track_info.name
     local track_key = make_track_route_key(track_info.parent_name, track_name)
 
-    local ch = channel_map[track_key] or channel_map[track_name] or implicit_ch
+    local ch = channel_map[track_key]
+      or channel_map[track_name]
+      or channel_map_lc[string.lower(track_key)]
+      or channel_map_lc[string.lower(track_name)]
+      or implicit_ch
 
     if ch == "L" then
       reaper.SetMediaTrackInfo_Value(track, "D_PAN",  -1.0)
@@ -1110,6 +1222,8 @@ local fns = {
   get_missing_tracks_for_preset = get_missing_tracks_for_preset,
   get_project_track_remap_target = get_project_track_remap_target,
   set_project_track_remap = set_project_track_remap,
+  remove_track_from_preset = remove_track_from_preset,
+  set_permanent_track_automap = set_permanent_track_automap,
   run_installer         = run_installer,
   restart_mixdeck_action = restart_mixdeck_action,
   set_install_source_dir = set_install_source_dir,

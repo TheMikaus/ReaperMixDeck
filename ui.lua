@@ -1,6 +1,6 @@
 -- ui.lua: ReaImGui UI for MixDeck
 -- Requires: ReaImGui extension (install via ReaPack)
--- Version: 1.3.28
+-- Version: 1.3.32
 
 local ui = {}
 
@@ -20,7 +20,6 @@ local add_track_sel        = 0      -- combo index for "Add Track" picker
 local install_source_buf   = ""     -- editable installer source folder for Update
 local status_msg           = ""
 local status_expiry        = 0
-local preview_active       = false  -- preview is playing
 local drag_src_idx         = nil    -- dragging preset from index
 
 local W_LEFT   = 295
@@ -101,13 +100,6 @@ local function handle_keyboard()
       set_status("Deleted: " .. p.name)
     end
   end
-end
-
-local function start_preview()
-  local preset = get_selected_preset()
-  if not preset then return end
-  set_status("Preview is not implemented yet for preset: " .. preset.name)
-  preview_active = true
 end
 
 local function reorder_presets(from_idx, to_idx)
@@ -365,13 +357,24 @@ local function draw_preset_editor()
       return route_key
     end
 
+    local route_key_lc = string.lower(route_key)
+    for existing_key, _ in pairs(preset.routing) do
+      if string.lower(tostring(existing_key)) == route_key_lc then
+        preset.routing[route_key] = preset.routing[existing_key]
+        if existing_key ~= route_key then
+          preset.routing[existing_key] = nil
+        end
+        return route_key
+      end
+    end
+
     local legacy_key = nil
     if preset.routing[track_info.name] then
       legacy_key = track_info.name
     else
       for existing_key, _ in pairs(preset.routing) do
         local legacy_name = tostring(existing_key):match("^%d+:%s*(.+)$")
-        if legacy_name and legacy_name == track_info.name then
+        if legacy_name and string.lower(legacy_name) == string.lower(track_info.name) then
           legacy_key = existing_key
           break
         end
@@ -498,70 +501,6 @@ local function draw_preset_editor()
     preset.routing[to_remove] = nil
   end
 
-  -- ── Missing tracks (project remap) ───────────────────────────────────────
-  local missing_tracks = {}
-  if fns and fns.get_missing_tracks_for_preset then
-    missing_tracks = fns.get_missing_tracks_for_preset(preset) or {}
-  end
-
-  if #missing_tracks > 0 then
-    reaper.ImGui_Spacing(ctx)
-    reaper.ImGui_Separator(ctx)
-    reaper.ImGui_Spacing(ctx)
-    reaper.ImGui_Text(ctx, "MISSING TRACKS (PROJECT REMAP)")
-    reaper.ImGui_TextDisabled(ctx, "Map missing preset routes to tracks in this project.")
-    reaper.ImGui_Spacing(ctx)
-
-    local all_tracks = fns.get_all_tracks()
-    local target_keys = {}
-    local target_items = "(unmapped)\0"
-    for _, t in ipairs(all_tracks) do
-      local route_key = t.route_key or t.name
-      table.insert(target_keys, route_key)
-      target_items = target_items .. route_key .. "\0"
-    end
-
-    for i, missing in ipairs(missing_tracks) do
-      local source_key = missing.source_key
-      local mapped_key = ""
-      if fns.get_project_track_remap_target then
-        mapped_key = fns.get_project_track_remap_target(source_key) or ""
-      end
-
-      reaper.ImGui_Text(ctx, source_key)
-      reaper.ImGui_SameLine(ctx)
-      reaper.ImGui_PushItemWidth(ctx, 260)
-
-      local current_idx = 0
-      if mapped_key ~= "" then
-        for idx, target_key in ipairs(target_keys) do
-          if target_key == mapped_key then
-            current_idx = idx
-            break
-          end
-        end
-      end
-
-      local combo_id = "##remap_" .. tostring(i)
-      local changed, new_idx = reaper.ImGui_Combo(ctx, combo_id, current_idx, target_items)
-      reaper.ImGui_PopItemWidth(ctx)
-
-      if changed and fns.set_project_track_remap then
-        local target_key = (new_idx == 0) and "" or target_keys[new_idx]
-        local ok = fns.set_project_track_remap(source_key, target_key)
-        if ok then
-          if target_key ~= "" then
-            set_status("Remapped: " .. source_key .. " -> " .. target_key)
-          else
-            set_status("Remap cleared: " .. source_key)
-          end
-        else
-          set_status("Failed to save remap for: " .. source_key)
-        end
-      end
-    end
-  end
-
   -- ── Add Track row ────────────────────────────────────────────────────────
   reaper.ImGui_Spacing(ctx)
   local all_tracks   = fns.get_all_tracks()
@@ -593,6 +532,97 @@ local function draw_preset_editor()
     reaper.ImGui_TextDisabled(ctx, "All project tracks are already in this preset.")
   end
 
+  -- Separator between add-track and missing-track remap sections
+  reaper.ImGui_Separator(ctx)
+
+  -- ── Missing tracks (project remap) ───────────────────────────────────────
+  local missing_tracks = {}
+  if fns and fns.get_missing_tracks_for_preset then
+    missing_tracks = fns.get_missing_tracks_for_preset(preset) or {}
+  end
+
+  if #missing_tracks > 0 then
+    reaper.ImGui_Spacing(ctx)
+    reaper.ImGui_Text(ctx, "MISSING TRACKS (PROJECT REMAP)")
+    reaper.ImGui_TextDisabled(ctx, "Map missing preset routes to tracks in this project.")
+    reaper.ImGui_Spacing(ctx)
+
+    local target_keys = {}
+    local target_items = "(unmapped)\0"
+    for _, t in ipairs(all_tracks) do
+      local route_key = t.route_key or t.name
+      table.insert(target_keys, route_key)
+      target_items = target_items .. route_key .. "\0"
+    end
+
+    for i, missing in ipairs(missing_tracks) do
+      local source_key = missing.source_key
+      local mapped_key = ""
+      if fns.get_project_track_remap_target then
+        mapped_key = fns.get_project_track_remap_target(source_key) or ""
+      end
+
+      reaper.ImGui_Text(ctx, source_key)
+      reaper.ImGui_SameLine(ctx)
+      reaper.ImGui_PushItemWidth(ctx, 260)
+
+      local current_idx = 0
+      if mapped_key ~= "" then
+        for idx, target_key in ipairs(target_keys) do
+          if string.lower(target_key) == string.lower(mapped_key) then
+            current_idx = idx
+            break
+          end
+        end
+      end
+
+      local combo_id = "##remap_" .. tostring(i)
+      local changed, new_idx = reaper.ImGui_Combo(ctx, combo_id, current_idx, target_items)
+      reaper.ImGui_PopItemWidth(ctx)
+
+      if changed and fns.set_project_track_remap then
+        local target_key = (new_idx == 0) and "" or target_keys[new_idx]
+        local ok = fns.set_project_track_remap(source_key, target_key)
+        if ok then
+          if target_key ~= "" then
+            set_status("Remapped: " .. source_key .. " -> " .. target_key)
+          else
+            set_status("Remap cleared: " .. source_key)
+          end
+        else
+          set_status("Failed to save remap for: " .. source_key)
+        end
+      end
+
+      reaper.ImGui_SameLine(ctx)
+      local del_id = "Delete##missing_" .. tostring(i)
+      if reaper.ImGui_SmallButton(ctx, del_id) and fns.remove_track_from_preset and preset and preset.name then
+        local ok = fns.remove_track_from_preset(preset.name, source_key)
+        if ok then
+          set_status("Removed from preset: " .. source_key)
+        else
+          set_status("Failed to remove: " .. source_key)
+        end
+      end
+
+      reaper.ImGui_SameLine(ctx)
+      local auto_id = "AutoMap##missing_" .. tostring(i)
+      if reaper.ImGui_SmallButton(ctx, auto_id) and fns.set_permanent_track_automap then
+        local target_key = (current_idx == 0) and "" or target_keys[current_idx]
+        if target_key == "" then
+          set_status("Select a target track before creating AutoMap")
+        else
+          local ok = fns.set_permanent_track_automap(source_key, target_key)
+          if ok then
+            set_status("Permanent AutoMap saved")
+          else
+            set_status("Failed to save Permanent AutoMap")
+          end
+        end
+      end
+    end
+  end
+
   reaper.ImGui_Separator(ctx)
 
 end
@@ -610,14 +640,6 @@ local function draw_center_action_bar(center_width)
   end
   reaper.ImGui_SameLine(ctx)
 
-  if reaper.ImGui_Button(ctx, "▶ Preview##prev_top", 90, 0) then
-    if preset then
-      start_preview()
-    else
-      set_status("Select a preset first.")
-    end
-  end
-  reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "Export This##ex1_top", 110, 0) then
     if not preset then
       set_status("Select a preset first.")

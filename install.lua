@@ -2,7 +2,7 @@
 -- Run this script once in Reaper (Actions > Load ReaScript, run it)
 -- It will check dependencies and install MixDeck to your Scripts folder.
 
-local MIXDECK_VERSION = "1.3.28"
+local MIXDECK_VERSION = "1.3.32"
 local REAIMGUI_MIN    = "0.8"
 
 -- ============================================================================
