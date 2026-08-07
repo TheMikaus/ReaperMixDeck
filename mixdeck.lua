@@ -1,7 +1,7 @@
 -- MixDeck: Export Preset Manager for Reaper
 -- Manage multiple export configurations and batch render with custom track routing
 -- @author ReaperAutomation
--- @version 1.3.24
+-- @version 1.3.26
 
 -- Load JSON utilities
 local function get_script_dir()
@@ -16,7 +16,7 @@ end
 local json = dofile(get_script_dir() .. "json_utils.lua")
 
 local md = {
-  version = "1.3.24",
+  version = "1.3.26",
   name = "MixDeck",
   global_presets = {},      -- Presets shared across all projects
   project_presets = {},     -- Presets specific to the current project
@@ -339,21 +339,34 @@ end
 local function get_all_tracks()
   local tracks = {}
   local track_count = reaper.CountTracks(0)
+  local parent_stack = {}
 
-  local function make_track_route_key(track_index, track_name)
-    return string.format("%03d: %s", track_index + 1, track_name)
+  local function make_track_route_key(parent_name, track_name)
+    local parent_part = parent_name or "<ROOT>"
+    return parent_part .. " > " .. track_name
   end
 
   for i = 0, track_count - 1 do
     local track = reaper.GetTrack(0, i)
     local retval, track_name = reaper.GetTrackName(track)
-    local is_folder = reaper.GetTrackDepth(track)
+    local depth = reaper.GetTrackDepth(track)
+    local parent_name = parent_stack[depth - 1]
+
+    local clear_depth = depth
+    while parent_stack[clear_depth] do
+      parent_stack[clear_depth] = nil
+      clear_depth = clear_depth + 1
+    end
+
+    parent_stack[depth] = track_name
+
     table.insert(tracks, {
       index = i,
       track = track,
       name = track_name,
-      route_key = make_track_route_key(i, track_name),
-      is_folder = is_folder,
+      parent_name = parent_name,
+      route_key = make_track_route_key(parent_name, track_name),
+      is_folder = depth,
     })
   end
   return tracks
@@ -704,10 +717,12 @@ local function restore_render_settings()
   reaper.GetSetProjectInfo(0, "RENDER_SAMPLERATE", saved_render.samplerate or 44100, true)
 end
 
-local function configure_render(preset, out_path)
-  -- Output file (folder + stem without extension; Reaper appends ext from format)
-  reaper.GetSetProjectInfo_String(0, "RENDER_FILE",    out_path, true)
-  reaper.GetSetProjectInfo_String(0, "RENDER_PATTERN", "",       true)  -- no additional pattern
+local function configure_render(preset, out_folder, out_pattern)
+  -- Output file setup:
+  -- RENDER_FILE is the destination folder, and RENDER_PATTERN is the base filename.
+  -- This avoids REAPER interpreting the intended stem as an extra subfolder.
+  reaper.GetSetProjectInfo_String(0, "RENDER_FILE",    out_folder, true)
+  reaper.GetSetProjectInfo_String(0, "RENDER_PATTERN", out_pattern, true)
 
   -- Format (use global settings, not per-preset). Fall back when unavailable.
   local format_to_use = md.format
@@ -776,8 +791,9 @@ end
 local function apply_routing(preset)
   log("Applying routing for preset: " .. preset.name, "INFO")
 
-  local function make_track_route_key(track_index, track_name)
-    return string.format("%03d: %s", track_index + 1, track_name)
+  local function make_track_route_key(parent_name, track_name)
+    local parent_part = parent_name or "<ROOT>"
+    return parent_part .. " > " .. track_name
   end
 
   -- Build a flat map of indexed_track_key -> channel for explicit routes.
@@ -806,11 +822,11 @@ local function apply_routing(preset)
   end
 
   -- Apply pan and mute to every track
-  local track_count = reaper.CountTracks(0)
-  for i = 0, track_count - 1 do
-    local track = reaper.GetTrack(0, i)
-    local retval, track_name = reaper.GetTrackName(track)
-    local track_key = make_track_route_key(i, track_name)
+  local tracks = get_all_tracks()
+  for _, track_info in ipairs(tracks) do
+    local track = track_info.track
+    local track_name = track_info.name
+    local track_key = make_track_route_key(track_info.parent_name, track_name)
 
     local ch = channel_map[track_key] or channel_map[track_name] or implicit_ch
 
@@ -857,14 +873,14 @@ local function export_preset(preset)
   local preset_dir = out_folder .. safe_preset
   reaper.RecursiveCreateDirectory(preset_dir, 0)
 
-  local out_stem  = preset_dir .. "/" .. safe_project .. "-" .. safe_preset
+  local out_pattern = safe_project .. "-" .. safe_preset
 
   -- Persist state
   save_render_settings()
   save_track_state()
 
   -- Configure
-  configure_render(preset, out_stem)
+  configure_render(preset, preset_dir, out_pattern)
   apply_routing(preset)
 
   -- Render (command 42230 = render using current settings, auto-close dialog)
@@ -876,7 +892,7 @@ local function export_preset(preset)
   reaper.UpdateArrange()
 
   -- Verify output was created
-  local expected = out_stem .. "." .. md.format
+  local expected = preset_dir .. "/" .. out_pattern .. "." .. md.format
   local f = io.open(expected, "r")
   if f then
     f:close()

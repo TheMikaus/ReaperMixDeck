@@ -1,6 +1,6 @@
 -- ui.lua: ReaImGui UI for MixDeck
 -- Requires: ReaImGui extension (install via ReaPack)
--- Version: 1.3.24
+-- Version: 1.3.26
 
 local ui = {}
 
@@ -359,6 +359,36 @@ local function draw_preset_editor()
   reaper.ImGui_Text(ctx, "TRACK ROUTING")
   reaper.ImGui_Spacing(ctx)
 
+  local function resolve_routing_key(track_info)
+    local route_key = track_info.route_key or track_info.name
+    if preset.routing[route_key] then
+      return route_key
+    end
+
+    local legacy_key = nil
+    if preset.routing[track_info.name] then
+      legacy_key = track_info.name
+    else
+      for existing_key, _ in pairs(preset.routing) do
+        local legacy_name = tostring(existing_key):match("^%d+:%s*(.+)$")
+        if legacy_name and legacy_name == track_info.name then
+          legacy_key = existing_key
+          break
+        end
+      end
+    end
+
+    if legacy_key then
+      preset.routing[route_key] = preset.routing[legacy_key]
+      if legacy_key ~= route_key then
+        preset.routing[legacy_key] = nil
+      end
+      return route_key
+    end
+
+    return nil
+  end
+
   -- ── Routing table ────────────────────────────────────────────────────────
   -- This table lets the user assign a routing channel to each track. The UI draws
   -- one row per track that already has an entry in the preset routing map, and each
@@ -378,12 +408,8 @@ local function draw_preset_editor()
       local all_tracks = fns.get_all_tracks()
       local row_index = 0
       for track_position, track_info in ipairs(all_tracks) do
-        local track_key = track_info.route_key or track_info.name
-        if preset.routing[track_key] or preset.routing[track_info.name] then
-          if preset.routing[track_info.name] and not preset.routing[track_key] then
-            preset.routing[track_key] = preset.routing[track_info.name]
-            preset.routing[track_info.name] = nil
-          end
+        local track_key = resolve_routing_key(track_info)
+        if track_key then
 
           row_index = row_index + 1
           reaper.ImGui_TableNextRow(ctx)
@@ -391,7 +417,7 @@ local function draw_preset_editor()
 
           -- Keep the row selection limited to the first column so the combo box can still open.
           local indent = string.rep("      ", track_info.is_folder)
-          local selection_id = indent .. track_key .. "##sel_" .. make_row_widget_id(row_index, "")
+          local selection_id = indent .. track_info.name .. "##sel_" .. make_row_widget_id(row_index, "")
           reaper.ImGui_Selectable(ctx, selection_id, false)
 
           -- Color the row based on whether it is hovered or whether it is a folder/child row.
@@ -478,8 +504,8 @@ local function draw_preset_editor()
   local avail_names  = {}
   local avail_str    = ""
   for _, t in ipairs(all_tracks) do
-    local track_key = t.route_key or t.name
-    if not preset.routing[track_key] and not preset.routing[t.name] then
+    local track_key = resolve_routing_key(t) or (t.route_key or t.name)
+    if not preset.routing[track_key] then
       table.insert(avail_names, track_key)
       avail_str = avail_str .. track_key .. "\0"
     end
