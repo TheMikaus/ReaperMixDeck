@@ -17,3 +17,14 @@ test_projects/
 .idea/
 *.swp
 *.swo
+
+# Runtime logs
+*.log
+
+# Python test cache
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Editor undo files
+*.un~

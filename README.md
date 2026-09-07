@@ -1,4 +1,4 @@
-# MixDeck 🎛️ v1.0.0
+# MixDeck 🎛️ v1.5.1
 
 A fast, professional **export preset manager** for Reaper. Define once, export forever — manage multi-channel mixes with L/R routing configurations, batch export all variations in one click.
 
@@ -13,6 +13,10 @@ A fast, professional **export preset manager** for Reaper. Define once, export f
 ✅ **Format Support** — MP3 (with bitrate control: 128–320k), WAV (24-bit), FLAC.
 
 ✅ **Flexible Export Paths** — Common export folder (all projects) + per-project overrides. Falls back to the project folder if not configured.
+
+✅ **Export Song As-Is** — Tick the box beside **Export All** to render the untouched mix first, as `{ProjectName}.{ext}`, before working through the presets. Gives you the reference full mix alongside the variations.
+
+✅ **Metronome** — Include a click in exports (handy for play-along takes), and keep the transport metronome on for recording. The export click uses Reaper's **click source**, laid over the project for the render and removed afterwards — real audio that renders, unlike the transport metronome.
 
 ✅ **Keyboard Shortcuts**
 - **Ctrl+S** — Save current preset
@@ -108,7 +112,9 @@ Find MixDeck in **Actions > Action list** (search: `MixDeck`) or assign a keyboa
 - Click **Export This** for a single preset, or
 - Click **Export All** to render all presets at once
 
-Output files: `{ProjectName}_{PresetName}.mp3` (or `.wav`, `.flac`)
+Output files: `{ExportFolder}/{PresetName}/{ProjectName}-{PresetName}.mp3` (or `.wav`, `.flac`)
+
+With **Export song as-is first** ticked, `{ExportFolder}/{ProjectName}.mp3` is rendered too — beside the preset folders, since it is not a preset.
 
 ## File Locations
 
@@ -117,34 +123,41 @@ Output files: `{ProjectName}_{PresetName}.mp3` (or `.wav`, `.flac`)
 | MixDeck scripts | `{Reaper resource path}/Scripts/MixDeck/` |
 | Global presets | `{Reaper resource path}/Scripts/MixDeck/mixdeck_global.json` |
 | Project presets | `{project folder}/{project name}.mixdeck.json` |
+| Logs | `{Reaper resource path}/Scripts/MixDeck/mixdeck.log` (and `mixdeck_errors.log`) |
+| Song as-is export | `{export folder}/{project name}.{ext}` |
 
 ## Architecture
 
-**mixdeck.lua** (550+ lines)
-- Config management (JSON save/load)
-- Preset CRUD
+**mixdeck.lua**
+- Config management (atomic, merge-preserving JSON save/load)
+- Preset CRUD and ordering
 - Track routing & pan control
-- Real render queue integration
+- Render integration, with project state snapshotted and restored around every export
 
-**ui.lua** (400+ lines)
+**ui.lua**
 - ImGui-based editor
 - Preset list with drag-to-reorder
 - Track routing table
 - Export folder settings
 
-**json_utils.lua** (150+ lines)
-- Standalone JSON encoder/decoder
+**json_utils.lua**
+- Standalone JSON encoder/decoder (strict: malformed input raises rather than looping)
+
+**installer_utils.lua**
+- Resolves which `install.lua` the in-app Update button runs
 
 **install.lua**
 - Dependency checker
 - Auto-installer to Reaper Scripts folder
 
-## Planned Features (v1.1+)
+**tests/**
+- Runs the real Lua against a mock Reaper API. `python -m pytest MixDeck/tests -q`
+
+## Planned Features
 
 - Audio preview (play 4 bars with current routing)
 - Presets library browser / web sync
 - Render progress indicator
-- Undo support
 - Stems export (one file per track)
 - Loudness normalization
 
@@ -161,6 +174,9 @@ Output files: `{ProjectName}_{PresetName}.mp3` (or `.wav`, `.flac`)
 
 **Tracks not routing correctly**
 → Track names are matched case-insensitively, and missing tracks can be remapped per project in the preset editor
+
+**No click in the exported file**
+→ MixDeck renders the click as a temporary click-source track, so metronome routing does not matter. If the click is missing, check the log in Settings for "Export click unavailable" — some builds may not expose a click source, and the Settings panel warns when that is the case.
 
 **Config file missing after export**
 → Check console (View → Show console) for `[MixDeck]` error messages

@@ -1,7 +1,7 @@
 -- MixDeck: Export Preset Manager for Reaper
 -- Manage multiple export configurations and batch render with custom track routing
 -- @author ReaperAutomation
--- @version 1.3.33
+-- @version 1.5.1
 
 -- Load JSON utilities
 local function get_script_dir()
@@ -14,9 +14,10 @@ local function get_script_dir()
 end
 
 local json = dofile(get_script_dir() .. "json_utils.lua")
+local installer_utils = dofile(get_script_dir() .. "installer_utils.lua")
 
 local md = {
-  version = "1.3.33",
+  version = "1.5.1",
   name = "MixDeck",
   global_presets = {},      -- Presets shared across all projects
   project_presets = {},     -- Presets specific to the current project
@@ -27,6 +28,9 @@ local md = {
   global_track_automap = {},-- Global missing-only name-to-name automap
   format = "mp3",           -- Global default format for exports
   bitrate = "320k",         -- Global default bitrate for MP3/OGG
+  metronome_in_export = false,    -- Put the click in the rendered files
+  metronome_in_recording = false, -- Leave the metronome on for recording
+  export_song_as_is = false,      -- Render the untouched mix before the presets
   config_file = "",
   current_project = "",
   ui_open = false,
@@ -87,11 +91,19 @@ end
 
 local function get_project_name()
   local retval, proj_path = reaper.EnumProjects(-1)
-  if proj_path == "" then
+  if not proj_path or proj_path == "" then
     return nil
   end
-  -- Extract filename without extension
-  local name = proj_path:match("^.+[\\/]([^\\/.]+)%.")
+  -- Filename without its extension. Strip only the *last* dot so a project
+  -- called "My.Song.rpp" stays "My.Song" instead of collapsing to "My".
+  local filename = proj_path:match("([^\\/]+)$")
+  if not filename or filename == "" then
+    return nil
+  end
+  local name = filename:match("^(.+)%.[^.]*$") or filename
+  if name == "" then
+    return nil
+  end
   return name
 end
 
@@ -152,11 +164,6 @@ local function get_project_config_path()
   return folder .. name .. ".mixdeck.json"
 end
 
--- Legacy alias used by export naming
-local function get_config_file_path()
-  return get_project_config_path()
-end
-
 -- Rebuild the merged preset list (global first, project presets override by name)
 local function rebuild_merged_presets()
   local merged = {}
@@ -205,12 +212,62 @@ local function load_config_file(path)
   local success, result = pcall(function()
     return json_decode_simple(content)
   end)
-  if success then
+  if success and type(result) == "table" then
     return result
-  else
-    log("Failed to parse: " .. path .. " - " .. tostring(result), "ERROR")
-    return {}
   end
+
+  -- Unreadable config. Keep a copy rather than letting the next save overwrite
+  -- it, so a hand-edit typo or a half-written file is still recoverable.
+  log("Failed to parse: " .. path .. " - " .. tostring(result), "ERROR")
+  local backup = path .. ".corrupt"
+  os.remove(backup)
+  if os.rename(path, backup) then
+    log("Moved unreadable config aside: " .. backup, "WARN")
+  end
+  return {}
+end
+
+-- Write JSON via a temp file so an interrupted save cannot leave a half-written
+-- config behind (which used to be unparseable and took Reaper down with it).
+local function write_json_file(path, tbl)
+  local encoded_ok, encoded = pcall(json_encode, tbl)
+  if not encoded_ok then
+    log("Failed to encode config for " .. path .. ": " .. tostring(encoded), "ERROR")
+    return false
+  end
+
+  local tmp_path = path .. ".tmp"
+  local file = io.open(tmp_path, "w")
+  if not file then
+    log("Failed to open config for writing: " .. tmp_path, "ERROR")
+    return false
+  end
+  file:write(encoded)
+  file:close()
+
+  os.remove(path)  -- os.rename will not clobber an existing file on Windows
+  local renamed, rename_err = os.rename(tmp_path, path)
+  if not renamed then
+    log("Failed to move config into place: " .. tostring(rename_err), "ERROR")
+    os.remove(tmp_path)
+    return false
+  end
+  return true
+end
+
+-- Merge `updates` into whatever is already on disk and write the result back.
+-- Config files are shared between concerns (presets, export path, format,
+-- remaps, default state), so a blind full-file write would drop the keys the
+-- caller does not know about.
+local function update_config_file(path, updates)
+  if not path then return false end
+  local data = load_config_file(path)
+  for key, value in pairs(updates) do
+    data[key] = value
+  end
+  data.version = md.version
+  data.timestamp = os.time()
+  return write_json_file(path, data)
 end
 
 local function load_config()
@@ -222,6 +279,9 @@ local function load_config()
   md.global_track_automap = global_data.track_automap or {}
   md.format = global_data.format or "mp3"
   md.bitrate = global_data.bitrate or "320k"
+  md.metronome_in_export = global_data.metronome_in_export == true
+  md.metronome_in_recording = global_data.metronome_in_recording == true
+  md.export_song_as_is = global_data.export_song_as_is == true
   log("Loaded " .. #md.global_presets .. " global presets from: " .. global_path, "INFO")
 
   -- Load project config (presets + project export path override)
@@ -284,15 +344,10 @@ local function save_preset_to_scope(preset, scope)
     table.insert(target, preset)
   end
 
-  -- Write to disk
-  local file = io.open(path, "w")
-  if not file then
+  if not update_config_file(path, { presets = target }) then
     log("Failed to write " .. scope .. " config: " .. path, "ERROR")
     return false
   end
-  local data = { version = md.version, presets = target, timestamp = os.time() }
-  file:write(json_encode(data))
-  file:close()
 
   rebuild_merged_presets()
   log("Saved preset '" .. preset.name .. "' to " .. scope .. " scope", "INFO")
@@ -315,27 +370,26 @@ local function save_config(scope)
       return false
     end
   end
-  local file = io.open(path, "w")
-  if not file then
+  local updates = {
+    presets = target,
+    export_path = export_path_val,
+  }
+  -- Format/bitrate are global-only settings; remaps differ per scope.
+  if scope == "global" then
+    updates.format = md.format
+    updates.bitrate = md.bitrate
+    updates.metronome_in_export = md.metronome_in_export == true
+    updates.metronome_in_recording = md.metronome_in_recording == true
+    updates.export_song_as_is = md.export_song_as_is == true
+    updates.track_automap = md.global_track_automap or {}
+  else
+    updates.track_remap = md.project_track_remap or {}
+  end
+
+  if not update_config_file(path, updates) then
     log("Failed to open config for writing: " .. path, "ERROR")
     return false
   end
-  local data = {
-    version = md.version,
-    presets = target,
-    export_path = export_path_val,
-    timestamp = os.time()
-  }
-  -- Add format/bitrate only to global config
-  if scope == "global" then
-    data.format = md.format
-    data.bitrate = md.bitrate
-    data.track_automap = md.global_track_automap or {}
-  else
-    data.track_remap = md.project_track_remap or {}
-  end
-  file:write(json_encode(data))
-  file:close()
   log("Saved " .. scope .. " config to: " .. path, "INFO")
   return true
 end
@@ -446,6 +500,10 @@ local function get_missing_tracks_for_preset(preset)
   return missing
 end
 
+-- Forward declaration: get_preset is defined under PRESET MANAGEMENT below, but
+-- is called from here. Without this the call would resolve to a nil global.
+local get_preset
+
 local function remove_track_from_preset(preset_name, route_key)
   local preset = get_preset(preset_name)
   if not preset or not preset.routing then
@@ -525,16 +583,6 @@ local function set_project_track_remap(source_key, target_key)
   return save_config("project")
 end
 
-local function print_track_structure()
-  log("=== Track Structure ===", "INFO")
-  local tracks = get_all_tracks()
-  for _, info in ipairs(tracks) do
-    local indent = string.rep("  ", info.is_folder)
-    log(indent .. info.name, "INFO")
-  end
-  log("======================", "INFO")
-end
-
 -- ============================================================================
 -- PRESET MANAGEMENT
 -- ============================================================================
@@ -605,13 +653,69 @@ local function delete_preset(name)
   return deleted
 end
 
-local function get_preset(name)
+function get_preset(name)
   for _, preset in ipairs(md.presets) do
     if preset.name == name then
       return preset
     end
   end
   return nil
+end
+
+-- Move a preset to a new position in the merged list. The order has to be
+-- written back to the scope list the preset actually lives in, otherwise it is
+-- lost the next time the merged view is rebuilt.
+--
+-- Note: the merged view is always global presets first, then project presets,
+-- so a move across that boundary snaps back to the scope grouping on reload.
+-- Ordering within a scope is preserved.
+local function reorder_preset(preset_name, to_index)
+  to_index = math.floor(tonumber(to_index) or 0)
+  if to_index < 1 or to_index > #md.presets then
+    log("Reorder target out of range: " .. tostring(to_index), "WARN")
+    return false
+  end
+
+  local from_index = nil
+  for i, preset in ipairs(md.presets) do
+    if preset.name == preset_name then
+      from_index = i
+      break
+    end
+  end
+  if not from_index then
+    log("Cannot reorder — preset not found: " .. tostring(preset_name), "WARN")
+    return false
+  end
+  if from_index == to_index then
+    return true
+  end
+
+  local moved = table.remove(md.presets, from_index)
+  table.insert(md.presets, to_index, moved)
+
+  -- Rewrite each scope list in the merged order so the change survives a reload.
+  local scope = moved.scope or "global"
+  local target = (scope == "project") and md.project_presets or md.global_presets
+  local reordered = {}
+  for _, preset in ipairs(md.presets) do
+    for _, candidate in ipairs(target) do
+      if candidate.name == preset.name then
+        reordered[#reordered + 1] = candidate
+        break
+      end
+    end
+  end
+  for i = 1, math.max(#target, #reordered) do
+    target[i] = reordered[i]
+  end
+
+  local saved = save_config(scope)
+  if saved then
+    rebuild_merged_presets()
+    log("Reordered preset '" .. tostring(preset_name) .. "' to position " .. to_index, "INFO")
+  end
+  return saved
 end
 
 local function update_preset_routing(preset_name, track_name, channel)
@@ -642,6 +746,151 @@ end
 -- ============================================================================
 -- EXPORT LOGIC
 -- ============================================================================
+
+-- ── Metronome ───────────────────────────────────────────────────────────────
+--
+-- 40364 is "Options: Toggle metronome". It is a toggle rather than a setter, so
+-- the state is read first and the command only fired when it needs to change.
+--
+-- Whether the click actually lands in a rendered file depends on the metronome
+-- being routed to the master, which is Reaper's default but can be changed in
+-- the metronome settings. If a render comes out silent on the click, that
+-- routing is the thing to check.
+local METRONOME_TOGGLE_COMMAND = 40364
+
+local function get_metronome_enabled()
+  if not reaper.GetToggleCommandState then return nil end
+  local state = reaper.GetToggleCommandState(METRONOME_TOGGLE_COMMAND)
+  if state == -1 then return nil end
+  return state == 1
+end
+
+-- Returns the previous state so a caller can put it back, or nil when the
+-- state could not be read on this build.
+local function set_metronome_enabled(enabled)
+  local previous = get_metronome_enabled()
+  if previous == nil then
+    log("Metronome state unavailable on this Reaper build", "WARN")
+    return nil
+  end
+  if previous ~= (enabled == true) then
+    reaper.Main_OnCommand(METRONOME_TOGGLE_COMMAND, 0)
+    log("Metronome " .. ((enabled == true) and "enabled" or "disabled"), "INFO")
+  end
+  return previous
+end
+
+-- Turn the metronome on (or off) and leave it that way, for tracking takes.
+local function set_metronome_for_recording(enabled)
+  md.metronome_in_recording = enabled == true
+  set_metronome_enabled(md.metronome_in_recording)
+  save_config("global")
+  return md.metronome_in_recording
+end
+
+-- ── Click track ─────────────────────────────────────────────────────────────
+--
+-- Enabling the transport metronome does NOT reliably put a click in a render:
+-- it is a monitoring feature, and whether it reaches the master depends on the
+-- user's metronome output routing. The renderable equivalent is Reaper's click
+-- *source* -- the same thing Insert > Click source creates -- which is a real
+-- media item on a real track and renders like any other audio.
+--
+-- So the export click is a temporary track carrying a click item, added after
+-- routing has been applied (so routing does not mute or pan it) and removed
+-- again before the track state is restored.
+
+local CLICK_TRACK_NAME = "MixDeck Click"
+
+local function create_click_source()
+  if not reaper.PCM_Source_CreateFromType then return nil end
+
+  for _, type_name in ipairs({ "click", "CLICK" }) do
+    local ok, source = pcall(reaper.PCM_Source_CreateFromType, type_name)
+    if ok and source then
+      -- Confirm what came back really is a click source rather than an empty
+      -- one, so a wrong type string fails loudly instead of rendering silence.
+      if not reaper.GetMediaSourceType then
+        return source
+      end
+      -- Builds differ in whether this returns just the type string or a
+      -- (retval, string) pair, so check whichever of the two is the string.
+      local typed, first, second = pcall(reaper.GetMediaSourceType, source, "")
+      local kind = tostring(second or first or "")
+      if typed and kind:upper():find("CLICK", 1, true) then
+        return source
+      end
+      if reaper.PCM_Source_Destroy then
+        pcall(reaper.PCM_Source_Destroy, source)
+      end
+    end
+  end
+  return nil
+end
+
+-- Whether this Reaper build can give us a renderable click at all. The UI asks
+-- before offering the option, so the answer arrives before an export, not after.
+local function click_source_available()
+  local source = create_click_source()
+  if not source then return false end
+  if reaper.PCM_Source_Destroy then
+    pcall(reaper.PCM_Source_Destroy, source)
+  end
+  return true
+end
+
+local function get_project_length()
+  if reaper.GetProjectLength then
+    local length = reaper.GetProjectLength(0)
+    if length and length > 0 then return length end
+  end
+  return 0
+end
+
+-- Appends the click track at the end, so the indices used by save_track_state /
+-- restore_track_state still line up.
+local function add_click_track()
+  local source = create_click_source()
+  if not source then
+    return nil, "This Reaper build did not provide a click source"
+  end
+
+  local length = get_project_length()
+  if length <= 0 then
+    return nil, "Project has no length to lay a click over"
+  end
+
+  local index = reaper.CountTracks(0)
+  reaper.InsertTrackAtIndex(index, false)
+  local track = reaper.GetTrack(0, index)
+  if not track then
+    return nil, "Could not create the click track"
+  end
+
+  reaper.GetSetMediaTrackInfo_String(track, "P_NAME", CLICK_TRACK_NAME, true)
+
+  local item = reaper.AddMediaItemToTrack(track)
+  local take = item and reaper.AddTakeToMediaItem(item)
+  if not take then
+    reaper.DeleteTrack(track)
+    return nil, "Could not create the click item"
+  end
+
+  reaper.SetMediaItemTake_Source(take, source)
+  reaper.SetMediaItemInfo_Value(item, "D_POSITION", 0)
+  reaper.SetMediaItemInfo_Value(item, "D_LENGTH", length)
+
+  log("Click track added for render (" .. string.format("%.2f", length) .. "s)", "INFO")
+  return track
+end
+
+local function remove_click_track(track)
+  if not track then return end
+  pcall(function()
+    reaper.DeleteTrack(track)
+  end)
+end
+
 
 -- Render format binary strings understood by Reaper's render engine
 -- Each format starts with a 4-byte little-endian tag followed by settings bytes
@@ -679,14 +928,24 @@ end
 
 local supported_render_formats_cache = nil
 
+-- Probing a format means writing it to the project and reading back what stuck,
+-- so the previous value is always put back — including if the round trip throws.
 local function is_render_format_supported(fmt, bitrate)
   local desired = get_render_format_string(fmt, bitrate)
   local _, previous = reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", "", false)
 
-  reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", desired, true)
-  local _, applied = reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", "", false)
+  local ok, applied = pcall(function()
+    reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", desired, true)
+    local _, current = reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", "", false)
+    return current
+  end)
 
   reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", previous or "", true)
+
+  if not ok then
+    log("Render format probe failed for " .. tostring(fmt) .. ": " .. tostring(applied), "WARN")
+    return false
+  end
   return get_fourcc(applied) == get_fourcc(desired)
 end
 
@@ -740,46 +999,35 @@ local function restore_track_state()
   reaper.UpdateArrange()
 end
 
--- Kept for compatibility; now wraps save_track_state
-local function save_mute_solo_state()  save_track_state() end
-local function restore_mute_solo_state() restore_track_state() end
-
 -- ── Default state management (save/restore entire project state) ─────────────
 
 local function save_default_state()
+  local project_path = get_project_config_path()
+  if not project_path then
+    log("Cannot save default state — no active project", "WARN")
+    return false
+  end
+
+  -- Keyed by route key, not bare name: duplicate track names are routine in
+  -- Reaper, and name keys silently collapsed them into one entry.
   local all_tracks = get_all_tracks()
   local default_state = {}
-  
   for _, track_info in ipairs(all_tracks) do
     local track = track_info.track
-    default_state[track_info.name] = {
+    default_state[track_info.route_key] = {
+      name  = track_info.name,
       pan   = reaper.GetMediaTrackInfo_Value(track, "D_PAN"),
       vol   = reaper.GetMediaTrackInfo_Value(track, "D_VOL"),
       mute  = reaper.GetMediaTrackInfo_Value(track, "B_MUTE"),
       solo  = reaper.GetMediaTrackInfo_Value(track, "I_SOLO"),
     }
   end
-  
-  -- Save to project config
-  local project_path = get_project_config_path()
-  if not project_path then
-    log("Cannot save default state — no active project", "WARN")
-    return false
-  end
-  
-  local project_data = load_config_file(project_path)
-  project_data.default_state = default_state
-  project_data.version = md.version
-  project_data.timestamp = os.time()
-  
-  local file = io.open(project_path, "w")
-  if not file then
+
+  if not update_config_file(project_path, { default_state = default_state }) then
     log("Failed to write default state: " .. project_path, "ERROR")
     return false
   end
-  file:write(json_encode(project_data))
-  file:close()
-  
+
   log("Saved default state for project with " .. #all_tracks .. " tracks", "INFO")
   return true
 end
@@ -804,8 +1052,10 @@ local function restore_default_state()
   
   for _, track_info in ipairs(all_tracks) do
     local track = track_info.track
-    local state = default_state[track_info.name]
-    
+    -- Route key first; fall back to the bare name for states saved before
+    -- route keys existed.
+    local state = default_state[track_info.route_key] or default_state[track_info.name]
+
     if state then
       reaper.SetMediaTrackInfo_Value(track, "D_PAN",  state.pan or 0)
       reaper.SetMediaTrackInfo_Value(track, "D_VOL",  state.vol or 1)
@@ -870,7 +1120,7 @@ local function restore_render_settings()
   reaper.GetSetProjectInfo(0, "RENDER_SAMPLERATE", saved_render.samplerate or 44100, true)
 end
 
-local function configure_render(preset, out_folder, out_pattern)
+local function configure_render(out_folder, out_pattern)
   -- Output file setup:
   -- RENDER_FILE is the destination folder, and RENDER_PATTERN is the base filename.
   -- This avoids REAPER interpreting the intended stem as an extra subfolder.
@@ -890,56 +1140,12 @@ local function configure_render(preset, out_folder, out_pattern)
   reaper.GetSetProjectInfo(0, "RENDER_BOUNDSFLAG", 1, true)  -- 1 = entire project
   reaper.GetSetProjectInfo(0, "RENDER_CHANNELS",   2, true)  -- stereo
   reaper.GetSetProjectInfo(0, "RENDER_SETTINGS",   0, true)  -- 0 = master mix
+
+  -- Caller needs the real extension to verify the output.
+  return format_to_use
 end
 
 -- ── Track routing ───────────────────────────────────────────────────────────
-
-local function find_track_by_name(name)
-  local track_count = reaper.CountTracks(0)
-  for i = 0, track_count - 1 do
-    local track = reaper.GetTrack(0, i)
-    local retval, track_name = reaper.GetTrackName(track)
-    if track_name == name then
-      return track, i
-    end
-  end
-  return nil, nil
-end
-
-local function get_children_tracks(parent_track)
-  local children = {}
-  local track_count = reaper.CountTracks(0)
-  local retval, parent_name = reaper.GetTrackName(parent_track)
-  local parent_depth = reaper.GetTrackDepth(parent_track)
-
-  -- Find parent track index
-  local parent_idx = nil
-  for i = 0, track_count - 1 do
-    local track = reaper.GetTrack(0, i)
-    if track == parent_track then
-      parent_idx = i
-      break
-    end
-  end
-
-  if not parent_idx then
-    return children
-  end
-
-  -- Find all children (tracks that follow with greater depth)
-  for i = parent_idx + 1, track_count - 1 do
-    local track = reaper.GetTrack(0, i)
-    local depth = reaper.GetTrackDepth(track)
-    if depth <= parent_depth then
-      break -- No longer a child
-    end
-    if depth == parent_depth + 1 then
-      table.insert(children, track)
-    end
-  end
-
-  return children
-end
 
 local function apply_routing(preset)
   log("Applying routing for preset: " .. preset.name, "INFO")
@@ -1025,6 +1231,77 @@ local function apply_routing(preset)
   log("Routing applied — " .. (implicit_ch and ("unmapped tracks → " .. implicit_ch) or "mixed routing"), "INFO")
 end
 
+-- Shared render machinery for both the preset exports and the as-is pass.
+--
+-- `prepare` is called inside the protected section to set the project up for
+-- this particular render (routing, for a preset) and may be nil for a render of
+-- the mix exactly as it stands. Everything it touches is restored afterwards,
+-- including on failure.
+local function render_project(out_folder, out_pattern, label, prepare)
+  save_render_settings()
+  save_track_state()
+
+  reaper.Undo_BeginBlock()
+  local format_used = md.format
+  local click_track = nil
+  local click_error = nil
+
+  local ok, err = pcall(function()
+    format_used = configure_render(out_folder, out_pattern)
+    if prepare then prepare() end
+
+    -- After routing, so the click is not muted or panned along with everything
+    -- else, and appended last so track indices stay stable for the restore.
+    if md.metronome_in_export then
+      click_track, click_error = add_click_track()
+      if not click_track then
+        log("Export click unavailable: " .. tostring(click_error), "ERROR")
+      end
+    end
+
+    -- 42230 = render using current settings, auto-close the dialog
+    reaper.Main_OnCommand(42230, 0)
+  end)
+
+  -- Remove the click track before restoring, so the restore sees the project
+  -- exactly as it was snapshotted.
+  remove_click_track(click_track)
+  restore_track_state()
+  restore_render_settings()
+  reaper.UpdateArrange()
+  reaper.Undo_EndBlock("MixDeck: Export " .. tostring(label), -1)
+
+  if not ok then
+    log("Export failed for '" .. tostring(label) .. "': " .. tostring(err), "ERROR")
+    return false, "Render failed: " .. tostring(err)
+  end
+
+  -- Verify the file actually landed, using the format the render really used
+  -- (configure_render falls back to WAV when a format is unavailable).
+  local expected = out_folder .. "/" .. out_pattern .. "." .. format_used
+  local f = io.open(expected, "r")
+  if f then
+    f:close()
+    log("Output: " .. expected, "INFO")
+    return true
+  end
+
+  log("No output file found after render: " .. expected, "ERROR")
+  return false, "No output file was produced at " .. expected
+end
+
+local function get_export_root()
+  local out_folder = get_export_path() or get_project_folder() or ""
+  if out_folder ~= "" and not out_folder:match("[\\/]$") then
+    out_folder = out_folder .. "/"
+  end
+  return out_folder
+end
+
+local function sanitize_filename(text)
+  return tostring(text or ""):gsub('[\\/:*?"<>|]', "_")
+end
+
 local function export_preset(preset)
   if not preset then
     return false, "Invalid preset"
@@ -1037,58 +1314,60 @@ local function export_preset(preset)
 
   log("Exporting preset: " .. preset.name, "INFO")
 
-  -- Build output path as:
   -- {export_folder}/{preset_name}/{project-name}-{preset_name}.{ext}
-  local out_folder = get_export_path() or get_project_folder() or ""
-  if out_folder ~= "" and not out_folder:match("[\\/]$") then
-    out_folder = out_folder .. "/"
-  end
-
-  local safe_project = project_name:gsub('[\\/:*?"<>|]', "_")
-  local safe_preset = preset.name:gsub('[\\/:*?"<>|]', "_")
-  local preset_dir = out_folder .. safe_preset
+  local safe_project = sanitize_filename(project_name)
+  local safe_preset = sanitize_filename(preset.name)
+  local preset_dir = get_export_root() .. safe_preset
   reaper.RecursiveCreateDirectory(preset_dir, 0)
 
-  local out_pattern = safe_project .. "-" .. safe_preset
+  return render_project(preset_dir, safe_project .. "-" .. safe_preset, preset.name, function()
+    apply_routing(preset)
+  end)
+end
 
-  -- Persist state
-  save_render_settings()
-  save_track_state()
-
-  -- Configure
-  configure_render(preset, preset_dir, out_pattern)
-  apply_routing(preset)
-
-  -- Render (command 42230 = render using current settings, auto-close dialog)
-  reaper.Main_OnCommand(42230, 0)
-
-  -- Restore everything
-  restore_track_state()
-  restore_render_settings()
-  reaper.UpdateArrange()
-
-  -- Verify output was created
-  local expected = preset_dir .. "/" .. out_pattern .. "." .. md.format
-  local f = io.open(expected, "r")
-  if f then
-    f:close()
-    log("Output: " .. expected, "INFO")
-    return true
-  else
-    -- Render may have completed but file extension differs; still counts as attempted
-    log("Render dispatched. Check: " .. expected, "INFO")
-    return true
+-- Render the mix exactly as it stands: no routing, no muting, nothing touched.
+-- Lands beside the preset folders rather than inside one, because it is not a
+-- preset.
+local function export_song_as_is()
+  local project_name = get_project_name()
+  if not project_name then
+    return false, "Project must be saved before exporting"
   end
+
+  log("Exporting song as-is", "INFO")
+
+  local out_dir = get_export_root()
+  if out_dir ~= "" then
+    -- Strip the trailing separator: RENDER_FILE wants the folder itself.
+    out_dir = out_dir:sub(1, -2)
+  end
+  if out_dir == "" then
+    return false, "No export folder is configured"
+  end
+  reaper.RecursiveCreateDirectory(out_dir, 0)
+
+  return render_project(out_dir, sanitize_filename(project_name), "song as-is", nil)
 end
 
 local function batch_export()
-  if #md.presets == 0 then
+  if #md.presets == 0 and not md.export_song_as_is then
     log("No presets defined", "WARN")
     return false
   end
 
   log("Starting batch export of " .. #md.presets .. " presets", "INFO")
   local failed = {}
+
+  -- The untouched mix goes first, so the reference file exists even if a preset
+  -- later fails.
+  if md.export_song_as_is then
+    local ok, err = export_song_as_is()
+    if not ok then
+      log("Failed: song as-is — " .. tostring(err), "ERROR")
+      failed[#failed + 1] = "song as-is"
+    end
+  end
+
   for _, preset in ipairs(md.presets) do
     local ok, err = export_preset(preset)
     if not ok then
@@ -1109,12 +1388,7 @@ end
 -- ============================================================================
 
 local function normalize_install_dir(dir)
-  if not dir or dir == "" then return "" end
-  local normalized = dir:gsub("\\", "/")
-  if normalized:sub(-1) ~= "/" then
-    normalized = normalized .. "/"
-  end
-  return normalized
+  return installer_utils.normalize_install_dir(dir)
 end
 
 local function set_install_source_dir(dir)
@@ -1124,41 +1398,7 @@ local function set_install_source_dir(dir)
 end
 
 local function resolve_installer_path(preferred_dir, saved_dir)
-  local candidates = {}
-  local current_dir = normalize_install_dir(get_script_dir())
-  if saved_dir and saved_dir ~= "" then
-    local normalized = normalize_install_dir(saved_dir)
-    if normalized ~= "" then
-      table.insert(candidates, normalized)
-    end
-  end
-
-  if preferred_dir and preferred_dir ~= "" then
-    local normalized = normalize_install_dir(preferred_dir)
-    if normalized ~= "" then
-      table.insert(candidates, normalized)
-    end
-  end
-
-  if current_dir ~= "" then
-    table.insert(candidates, current_dir)
-  end
-
-  local seen = {}
-  for _, dir in ipairs(candidates) do
-    if not seen[dir] then
-      seen[dir] = true
-      local path = dir .. "install.lua"
-      local file = io.open(path, "r")
-      if file then
-        file:close()
-        return dir, path
-      end
-    end
-  end
-
-  local fallback_dir = normalize_install_dir(preferred_dir or saved_dir or current_dir)
-  return fallback_dir, fallback_dir .. "install.lua"
+  return installer_utils.resolve_installer_path(preferred_dir, saved_dir)
 end
 
 local function run_installer()
@@ -1208,12 +1448,20 @@ local fns = {
   create_preset        = create_preset,
   delete_preset        = delete_preset,
   get_preset           = get_preset,
+  reorder_preset       = reorder_preset,
+  update_preset_routing = update_preset_routing,
   save_preset_to_scope = save_preset_to_scope,
   save_config          = save_config,
+  load_config          = load_config,
   get_all_tracks       = get_all_tracks,
   get_project_name     = get_project_name,
   get_export_path      = get_export_path,
   export_preset        = export_preset,
+  export_song_as_is    = export_song_as_is,
+  get_metronome_enabled = get_metronome_enabled,
+  click_source_available = click_source_available,
+  set_metronome_enabled = set_metronome_enabled,
+  set_metronome_for_recording = set_metronome_for_recording,
   batch_export         = batch_export,
   save_default_state   = save_default_state,
   restore_default_state = restore_default_state,

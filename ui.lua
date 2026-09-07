@@ -1,6 +1,6 @@
 -- ui.lua: ReaImGui UI for MixDeck
 -- Requires: ReaImGui extension (install via ReaPack)
--- Version: 1.3.33
+-- Version: 1.5.1
 
 local ui = {}
 
@@ -16,6 +16,8 @@ local sel_idx              = 0      -- selected preset index (1-based, 0 = none)
 local show_settings        = false
 local new_preset_name_buf  = ""
 local show_new_popup       = false
+local show_delete_popup    = false
+local pending_delete_name  = nil
 local add_track_sel        = 0      -- combo index for "Add Track" picker
 local install_source_buf   = ""     -- editable installer source folder for Update
 local status_msg           = ""
@@ -69,10 +71,34 @@ local function ensure_context()
   return ctx ~= nil
 end
 
+-- True while a widget owns the keyboard — typing in a text box, dragging a
+-- slider. Shortcuts must stand down, or Delete inside the preset-name field
+-- deletes the preset itself.
+local function keyboard_is_captured()
+  if reaper.APIExists("ImGui_IsAnyItemActive") and reaper.ImGui_IsAnyItemActive(ctx) then
+    return true
+  end
+  if reaper.APIExists("ImGui_IsAnyItemFocused") and reaper.ImGui_IsAnyItemFocused(ctx) then
+    return true
+  end
+  return false
+end
+
+local function ctrl_is_down()
+  if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl()) then return true end
+  if reaper.APIExists("ImGui_Key_RightCtrl")
+    and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_RightCtrl()) then
+    return true
+  end
+  return false
+end
+
 local function handle_keyboard()
+  if keyboard_is_captured() then return end
+
   -- Ctrl+S: save preset
   if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_S()) then
-    if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl()) then
+    if ctrl_is_down() then
       local p = get_selected_preset()
       if p then
         fns.save_preset_to_scope(p, p.scope or "global")
@@ -82,22 +108,22 @@ local function handle_keyboard()
   end
   -- Ctrl+E: export preset
   if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_E()) then
-    if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl()) then
+    if ctrl_is_down() then
       local p = get_selected_preset()
       if p then
-        local ok = fns.export_preset(p)
+        local ok, err = fns.export_preset(p)
         if ok then set_status("Exported: " .. p.name)
-        else set_status("Export failed") end
+        else set_status("Export failed: " .. tostring(err or "unknown error")) end
       end
     end
   end
-  -- Delete: delete preset
+  -- Delete: ask before destroying a preset (the write is immediate and there is
+  -- no undo for it).
   if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Delete()) then
     local p = get_selected_preset()
     if p then
-      fns.delete_preset(p.name)
-      sel_idx = 0
-      set_status("Deleted: " .. p.name)
+      pending_delete_name = p.name
+      show_delete_popup = true
     end
   end
 end
@@ -105,16 +131,22 @@ end
 local function reorder_presets(from_idx, to_idx)
   if from_idx < 1 or to_idx < 1 or from_idx > #md_ref.presets or to_idx > #md_ref.presets then return end
   if from_idx == to_idx then return end
-  local preset = table.remove(md_ref.presets, from_idx)
-  table.insert(md_ref.presets, to_idx, preset)
-  sel_idx = to_idx
-  -- Save current scope config
-  if preset.scope == "project" then
-    fns.save_config("project")
+  local preset = md_ref.presets[from_idx]
+  if not preset then return end
+
+  if fns.reorder_preset(preset.name, to_idx) then
+    -- The merged list is rebuilt on save, so find where the preset landed.
+    sel_idx = to_idx
+    for i, p in ipairs(md_ref.presets) do
+      if p.name == preset.name then
+        sel_idx = i
+        break
+      end
+    end
+    set_status("Reordered preset")
   else
-    fns.save_config("global")
+    set_status("Could not reorder preset")
   end
-  set_status("Reordered preset")
 end
 
 -- Compat: border flag for BeginChild changed in ReaImGui 0.8+
@@ -254,9 +286,8 @@ local function draw_preset_list()
   if reaper.ImGui_Button(ctx, "- Delete##db", 92, 0) then
     local p = get_selected_preset()
     if p then
-      fns.delete_preset(p.name)
-      sel_idx = 0
-      set_status("Deleted: " .. p.name)
+      pending_delete_name = p.name
+      show_delete_popup = true
     end
   end
   reaper.ImGui_SameLine(ctx)
@@ -646,9 +677,9 @@ local function draw_center_action_bar(center_width)
     elseif not fns.get_project_name() then
       set_status("Error: save your project before exporting.")
     else
-      local ok = fns.export_preset(preset)
+      local ok, err = fns.export_preset(preset)
       if ok then set_status("Exported: " .. preset.name)
-      else set_status("Export failed — check Reaper console.") end
+      else set_status("Export failed: " .. tostring(err or "see the log in Settings")) end
     end
   end
   reaper.ImGui_SameLine(ctx)
@@ -656,9 +687,31 @@ local function draw_center_action_bar(center_width)
     if not fns.get_project_name() then
       set_status("Error: save your project before exporting.")
     else
-      fns.batch_export()
-      set_status("Batch export complete (" .. #md_ref.presets .. " presets)")
+      local ok = fns.batch_export()
+      local count = #md_ref.presets
+      local what = count .. " preset" .. ((count == 1) and "" or "s")
+      if md_ref.export_song_as_is then
+        what = what .. " + song as-is"
+      end
+      if ok then
+        set_status("Batch export complete (" .. what .. ")")
+      else
+        set_status("Batch export finished with failures — see the log in Settings.")
+      end
     end
+  end
+
+  reaper.ImGui_SameLine(ctx)
+  local as_is_changed, as_is_value =
+    reaper.ImGui_Checkbox(ctx, "Export song as-is first##asis", md_ref.export_song_as_is == true)
+  if as_is_changed then
+    md_ref.export_song_as_is = as_is_value
+    fns.save_config("global")
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx,
+      "Export All renders the untouched mix first, as {project}.{ext},\n"
+      .. "before working through the presets.")
   end
 end
 
@@ -828,6 +881,67 @@ local function draw_settings()
   reaper.ImGui_TextDisabled(ctx, "  " .. (resolved or "(project folder)"))
 
   reaper.ImGui_Spacing(ctx)
+  reaper.ImGui_Separator(ctx)
+  reaper.ImGui_Spacing(ctx)
+
+  reaper.ImGui_Text(ctx, "Metronome")
+
+  local click_available = true
+  if fns.click_source_available then
+    click_available = fns.click_source_available() == true
+  end
+
+  local click_export_changed, click_export_value =
+    reaper.ImGui_Checkbox(ctx, "Include click in exports##metro_export",
+      md_ref.metronome_in_export == true)
+  if click_export_changed then
+    md_ref.metronome_in_export = click_export_value
+    fns.save_config("global")
+    set_status(click_export_value and "Click will be included in exports"
+      or "Click will not be included in exports")
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx,
+      "Lays a click track over the project for the duration of each render,\n"
+      .. "then removes it. Useful for play-along takes.\n\n"
+      .. "This uses Reaper's click source -- the same thing Insert > Click\n"
+      .. "source creates -- so it is real audio that renders. Simply enabling\n"
+      .. "the transport metronome does not reliably reach a render.")
+  end
+  if md_ref.metronome_in_export and not click_available then
+    reaper.ImGui_TextDisabled(ctx,
+      "  ! No click source on this Reaper build — exports will have no click")
+  end
+
+  local click_rec_changed, click_rec_value =
+    reaper.ImGui_Checkbox(ctx, "Metronome on for recording##metro_rec",
+      md_ref.metronome_in_recording == true)
+  if click_rec_changed then
+    if fns.set_metronome_for_recording then
+      fns.set_metronome_for_recording(click_rec_value)
+    end
+    set_status(click_rec_value and "Metronome on" or "Metronome off")
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx,
+      "Turns Reaper's transport metronome on and leaves it on, so it runs\n"
+      .. "while you record.\n\n"
+      .. "This is a different mechanism from the export click above: the\n"
+      .. "transport metronome is what you monitor, the click source is what\n"
+      .. "renders.")
+  end
+
+  local metro_state = fns.get_metronome_enabled and fns.get_metronome_enabled()
+  if metro_state == nil then
+    reaper.ImGui_TextDisabled(ctx, "  Metronome state unavailable on this Reaper build")
+  else
+    reaper.ImGui_TextDisabled(ctx, "  Metronome is currently "
+      .. (metro_state and "ON" or "OFF"))
+  end
+
+  reaper.ImGui_Spacing(ctx)
+  reaper.ImGui_Separator(ctx)
+  reaper.ImGui_Spacing(ctx)
 
   if reaper.ImGui_Button(ctx, "Save Settings##saveset") then
     fns.save_config("global")
@@ -983,6 +1097,48 @@ local function draw_new_preset_popup()
   end
 end
 
+local function draw_delete_preset_popup()
+  if show_delete_popup then
+    local win_x, win_y = reaper.ImGui_GetWindowPos(ctx)
+    local win_w = reaper.ImGui_GetWindowWidth(ctx)
+    local win_h = reaper.ImGui_GetWindowHeight(ctx)
+    local dialog_w, dialog_h = 320, 130
+    reaper.ImGui_SetNextWindowPos(ctx, win_x + (win_w - dialog_w) / 2, win_y + (win_h - dialog_h) / 2, reaper.ImGui_Cond_Appearing())
+    reaper.ImGui_OpenPopup(ctx, "Delete Preset##popup")
+    show_delete_popup = false
+  end
+
+  local visible = reaper.ImGui_BeginPopupModal(ctx, "Delete Preset##popup", true,
+    reaper.ImGui_WindowFlags_AlwaysAutoResize())
+
+  if visible then
+    reaper.ImGui_Text(ctx, "Delete preset \"" .. tostring(pending_delete_name) .. "\"?")
+    reaper.ImGui_Spacing(ctx)
+    reaper.ImGui_TextDisabled(ctx, "This cannot be undone.")
+    reaper.ImGui_Spacing(ctx)
+    reaper.ImGui_Separator(ctx)
+    reaper.ImGui_Spacing(ctx)
+
+    if reaper.ImGui_Button(ctx, "Delete", 100, 0) then
+      if pending_delete_name then
+        fns.delete_preset(pending_delete_name)
+        set_status("Deleted: " .. pending_delete_name)
+        sel_idx = 0
+      end
+      pending_delete_name = nil
+      reaper.ImGui_CloseCurrentPopup(ctx)
+    end
+
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "Cancel", 100, 0) then
+      pending_delete_name = nil
+      reaper.ImGui_CloseCurrentPopup(ctx)
+    end
+
+    reaper.ImGui_EndPopup(ctx)
+  end
+end
+
 -- ============================================================================
 -- MAIN DRAW (called every frame via defer)
 -- ============================================================================
@@ -1033,6 +1189,7 @@ function ui.draw()
 
       -- ── Popups ───────────────────────────────────────────────────────────────
       draw_new_preset_popup()
+      draw_delete_preset_popup()
 
       reaper.ImGui_End(ctx)
     end
